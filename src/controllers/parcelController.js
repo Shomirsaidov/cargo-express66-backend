@@ -204,6 +204,13 @@ const update = async (req, res, next) => {
       updates.photos = existingPhotos.filter((p) => !toRemove.includes(p));
     }
 
+    // Auto-transition status if customer is assigned to unknown recipient
+    let autoLinked = false;
+    if (customer_id && !existing.customer_id && existing.status === 'unknown_recipient') {
+      updates.status = 'received_at_warehouse';
+      autoLinked = true;
+    }
+
     const { data, error } = await supabaseAdmin
       .from('parcels')
       .update(updates)
@@ -212,6 +219,24 @@ const update = async (req, res, next) => {
       .single();
 
     if (error) throw error;
+
+    if (autoLinked) {
+      // Clean up previous unknown recipient history entries
+      await supabaseAdmin
+        .from('parcel_status_history')
+        .update({ status: 'received_at_warehouse' })
+        .eq('parcel_id', req.params.id)
+        .eq('status', 'unknown_recipient');
+
+      // Add a status history entry for the assignment
+      await supabaseAdmin.from('parcel_status_history').insert({
+        parcel_id: req.params.id,
+        status: 'received_at_warehouse',
+        notes: 'Customer assigned by admin',
+        changed_by: req.user.id
+      });
+    }
+
     res.json({ data });
   } catch (err) {
     next(err);
@@ -242,6 +267,9 @@ const updateStatus = async (req, res, next) => {
 
     if (fetchError || !existing) return res.status(404).json({ error: 'Parcel not found' });
 
+    // If previous status was unknown_recipient and new status is different, clean up history
+    const isTransitioningFromUnknown = existing.status === 'unknown_recipient' && status !== 'unknown_recipient';
+
     // Update parcel status
     const statusUpdates = { status };
     if (status === 'delivered') statusUpdates.delivery_date = new Date().toISOString();
@@ -256,6 +284,15 @@ const updateStatus = async (req, res, next) => {
       .single();
 
     if (updateError) throw updateError;
+
+    if (isTransitioningFromUnknown) {
+      // Clean up previous unknown recipient history entries
+      await supabaseAdmin
+        .from('parcel_status_history')
+        .update({ status: 'received_at_warehouse' })
+        .eq('parcel_id', req.params.id)
+        .eq('status', 'unknown_recipient');
+    }
 
     // Record in history
     await supabaseAdmin.from('parcel_status_history').insert({
