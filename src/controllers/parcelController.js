@@ -267,14 +267,20 @@ const updateStatus = async (req, res, next) => {
 
     if (fetchError || !existing) return res.status(404).json({ error: 'Parcel not found' });
 
+    // If the parcel has a customer, its status cannot be "unknown_recipient"
+    let targetStatus = status;
+    if (targetStatus === 'unknown_recipient' && existing.customer_id) {
+      targetStatus = 'received_at_warehouse';
+    }
+
     // If previous status was unknown_recipient and new status is different, clean up history
-    const isTransitioningFromUnknown = existing.status === 'unknown_recipient' && status !== 'unknown_recipient';
+    const isTransitioningFromUnknown = existing.status === 'unknown_recipient' && targetStatus !== 'unknown_recipient';
 
     // Update parcel status
-    const statusUpdates = { status };
-    if (status === 'delivered') statusUpdates.delivery_date = new Date().toISOString();
-    if (status === 'received_at_warehouse') statusUpdates.arrival_date = new Date().toISOString();
-    if (status === 'dispatched') statusUpdates.shipment_date = new Date().toISOString();
+    const statusUpdates = { status: targetStatus };
+    if (targetStatus === 'delivered') statusUpdates.delivery_date = new Date().toISOString();
+    if (targetStatus === 'received_at_warehouse') statusUpdates.arrival_date = new Date().toISOString();
+    if (targetStatus === 'dispatched') statusUpdates.shipment_date = new Date().toISOString();
 
     const { data: updatedParcel, error: updateError } = await supabaseAdmin
       .from('parcels')
@@ -297,14 +303,14 @@ const updateStatus = async (req, res, next) => {
     // Record in history
     await supabaseAdmin.from('parcel_status_history').insert({
       parcel_id: req.params.id,
-      status,
+      status: targetStatus,
       notes: notes || null,
       changed_by: req.user.id,
     });
 
     // Send notification if customer is assigned
     if (updatedParcel.customer_id) {
-      await notificationService.notifyParcelStatus(updatedParcel, status);
+      await notificationService.notifyParcelStatus(updatedParcel, targetStatus);
     }
 
     res.json({ data: updatedParcel });
