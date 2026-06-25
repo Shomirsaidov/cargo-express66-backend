@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/supabase');
+const notificationService = require('../services/notificationService');
 
 const VALID_AWB_STATUSES = ['pending', 'active', 'in_transit', 'arrived', 'completed', 'cancelled'];
 
@@ -112,6 +113,11 @@ const update = async (req, res, next) => {
 
     if (error) throw error;
     if (!data) return res.status(404).json({ error: 'Air waybill not found' });
+
+    if (status !== undefined) {
+      await syncParcelsStatus(req.params.id, status, data.awb_number, req.user?.id);
+    }
+
     res.json({ data });
   } catch (err) {
     next(err);
@@ -156,7 +162,7 @@ const assignParcel = async (req, res, next) => {
     // Verify AWB exists
     const { data: awb, error: awbError } = await supabaseAdmin
       .from('airway_bills')
-      .select('id, status')
+      .select('id, status, awb_number')
       .eq('id', req.params.id)
       .single();
 
@@ -189,11 +195,52 @@ const assignParcel = async (req, res, next) => {
 
     if (insertError) throw insertError;
 
+    // Determine parcel status based on current AWB status
+    let parcelStatus = 'assigned_to_flight';
+    let notes = `Parcel assigned to flight ${awb.awb_number}`;
+
+    if (awb.status === 'departed' || awb.status === 'in_transit') {
+      parcelStatus = 'in_transit';
+      notes = `Parcel assigned to departed flight ${awb.awb_number}`;
+    } else if (awb.status === 'arrived') {
+      parcelStatus = 'arrived_in_dushanbe';
+      notes = `Parcel assigned to arrived flight ${awb.awb_number}`;
+    } else if (awb.status === 'completed') {
+      parcelStatus = 'arrived_in_dushanbe';
+      notes = `Parcel assigned to completed flight ${awb.awb_number}`;
+    } else if (awb.status === 'cancelled') {
+      parcelStatus = 'received_at_warehouse';
+      notes = `Parcel assigned to cancelled flight ${awb.awb_number}`;
+    }
+
     // Update parcel airway_bill_id and status
-    await supabaseAdmin
+    const { data: updatedParcel, error: updateParcelErr } = await supabaseAdmin
       .from('parcels')
-      .update({ airway_bill_id: req.params.id, status: 'assigned_to_flight' })
-      .eq('id', parcel_id);
+      .update({ 
+        airway_bill_id: req.params.id, 
+        status: parcelStatus,
+        ...(parcelStatus === 'in_transit' ? { shipment_date: new Date().toISOString() } : {}),
+        ...(parcelStatus === 'arrived_in_dushanbe' ? { arrival_date: new Date().toISOString() } : {})
+      })
+      .eq('id', parcel_id)
+      .select('*, customers(id, first_name, last_name, email)')
+      .single();
+
+    if (updateParcelErr) throw updateParcelErr;
+
+    // Log status history
+    await supabaseAdmin.from('parcel_status_history').insert({
+      parcel_id,
+      status: parcelStatus,
+      notes,
+      changed_by: req.user?.id || null
+    });
+
+    // Send notification
+    if (updatedParcel.customer_id) {
+      updatedParcel.awb_number = awb.awb_number;
+      await notificationService.notifyParcelStatus(updatedParcel, parcelStatus);
+    }
 
     res.status(201).json({ message: 'Parcel assigned to air waybill' });
   } catch (err) {
@@ -206,17 +253,31 @@ const assignParcel = async (req, res, next) => {
  */
 const removeParcel = async (req, res, next) => {
   try {
+    const { data: awb } = await supabaseAdmin
+      .from('airway_bills')
+      .select('awb_number')
+      .eq('id', req.params.id)
+      .single();
+
     await supabaseAdmin
       .from('airway_bill_parcels')
       .delete()
       .eq('airway_bill_id', req.params.id)
       .eq('parcel_id', req.params.parcel_id);
 
-    // Reset parcel airway_bill_id
+    // Reset parcel airway_bill_id and set status back to received_at_warehouse
     await supabaseAdmin
       .from('parcels')
-      .update({ airway_bill_id: null })
+      .update({ airway_bill_id: null, status: 'received_at_warehouse' })
       .eq('id', req.params.parcel_id);
+
+    // Log status history
+    await supabaseAdmin.from('parcel_status_history').insert({
+      parcel_id: req.params.parcel_id,
+      status: 'received_at_warehouse',
+      notes: `Parcel removed from flight ${awb?.awb_number || ''}`,
+      changed_by: req.user?.id || null
+    });
 
     res.json({ message: 'Parcel removed from air waybill' });
   } catch (err) {
@@ -246,25 +307,94 @@ const updateStatus = async (req, res, next) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ error: 'Air waybill not found' });
 
-    // If AWB is in_transit, update all assigned parcels
-    if (status === 'in_transit') {
-      const { data: awbParcels } = await supabaseAdmin
-        .from('airway_bill_parcels')
-        .select('parcel_id')
-        .eq('airway_bill_id', req.params.id);
-
-      if (awbParcels && awbParcels.length > 0) {
-        const parcelIds = awbParcels.map((r) => r.parcel_id);
-        await supabaseAdmin
-          .from('parcels')
-          .update({ status: 'in_transit' })
-          .in('id', parcelIds);
-      }
-    }
+    // Sync status of all assigned parcels
+    await syncParcelsStatus(req.params.id, status, data.awb_number, req.user?.id);
 
     res.json({ data });
   } catch (err) {
     next(err);
+  }
+};
+
+/**
+ * Helper to sync all assigned parcels status with AWB status
+ */
+const syncParcelsStatus = async (awbId, awbStatus, awbNumber, changedByUserId) => {
+  try {
+    const { data: awbParcels } = await supabaseAdmin
+      .from('airway_bill_parcels')
+      .select('parcel_id')
+      .eq('airway_bill_id', awbId);
+
+    if (!awbParcels || awbParcels.length === 0) return;
+
+    const parcelIds = awbParcels.map((r) => r.parcel_id);
+
+    let parcelStatus = null;
+    let notes = null;
+
+    if (awbStatus === 'scheduled' || awbStatus === 'pending' || awbStatus === 'active') {
+      parcelStatus = 'assigned_to_flight';
+      notes = `Flight ${awbNumber} scheduled`;
+    } else if (awbStatus === 'departed' || awbStatus === 'in_transit') {
+      parcelStatus = 'in_transit';
+      notes = `Flight ${awbNumber} departed in transit`;
+    } else if (awbStatus === 'arrived') {
+      parcelStatus = 'arrived_in_dushanbe';
+      notes = `Flight ${awbNumber} arrived in Dushanbe`;
+    } else if (awbStatus === 'completed') {
+      parcelStatus = 'arrived_in_dushanbe';
+      notes = `Flight ${awbNumber} completed`;
+    } else if (awbStatus === 'cancelled') {
+      parcelStatus = 'received_at_warehouse';
+      notes = `Flight ${awbNumber} cancelled`;
+    }
+
+    if (!parcelStatus) return;
+
+    const statusUpdates = { status: parcelStatus };
+    if (parcelStatus === 'in_transit') {
+      statusUpdates.shipment_date = new Date().toISOString();
+    } else if (parcelStatus === 'arrived_in_dushanbe') {
+      statusUpdates.arrival_date = new Date().toISOString();
+    }
+
+    // Update all parcels
+    const { error: updateError } = await supabaseAdmin
+      .from('parcels')
+      .update(statusUpdates)
+      .in('id', parcelIds);
+
+    if (updateError) throw updateError;
+
+    // Log history for all parcels
+    const historyRecords = parcelIds.map((id) => ({
+      parcel_id: id,
+      status: parcelStatus,
+      notes: notes,
+      changed_by: changedByUserId || null,
+    }));
+
+    await supabaseAdmin
+      .from('parcel_status_history')
+      .insert(historyRecords);
+
+    // Fetch full parcel and customer info to send notifications
+    const { data: parcelsToNotify } = await supabaseAdmin
+      .from('parcels')
+      .select('*, customers(id, first_name, last_name, email)')
+      .in('id', parcelIds);
+
+    if (parcelsToNotify && parcelsToNotify.length > 0) {
+      for (const p of parcelsToNotify) {
+        if (p.customer_id) {
+          p.awb_number = awbNumber;
+          await notificationService.notifyParcelStatus(p, parcelStatus);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('syncParcelsStatus error:', err);
   }
 };
 
