@@ -290,6 +290,48 @@ const scan = async (req, res, next) => {
 };
 
 /**
+ * GET /api/parcels/track/:tracking_number — public tracking
+ */
+const getByTrackingNumber = async (req, res, next) => {
+  try {
+    const { tracking_number } = req.params;
+    const { data: parcel, error } = await supabaseAdmin
+      .from('parcels')
+      .select(`
+        *,
+        warehouses(name),
+        parcel_status_history(status, notes, created_at)
+      `)
+      .eq('tracking_number', tracking_number.trim())
+      .single();
+
+    if (error || !parcel) {
+      return res.status(404).json({ error: 'Parcel not found' });
+    }
+
+    // Format response to match what the frontend expects
+    const formattedParcel = {
+      id: parcel.id,
+      tracking_number: parcel.tracking_number,
+      status: parcel.status,
+      weight: parcel.weight,
+      warehouse_name: parcel.warehouses ? parcel.warehouses.name : null,
+      arrival_date: parcel.arrival_date,
+      updated_at: parcel.updated_at,
+      status_history: (parcel.parcel_status_history || []).map(h => ({
+        status: h.status,
+        note: h.notes,
+        created_at: h.created_at
+      })).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    };
+
+    res.json(formattedParcel);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * DELETE /api/parcels/:id — admin only
  */
 const remove = async (req, res, next) => {
@@ -306,4 +348,4 @@ const remove = async (req, res, next) => {
   }
 };
 
-module.exports = { list, getById, create, update, updateStatus, scan, remove };
+module.exports = { list, getById, create, update, updateStatus, scan, getByTrackingNumber, remove };

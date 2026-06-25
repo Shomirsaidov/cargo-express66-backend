@@ -26,6 +26,9 @@ router.get(
   parcelController.scan
 );
 
+// GET /api/parcels/track/:tracking_number — public tracking
+router.get('/track/:tracking_number', parcelController.getByTrackingNumber);
+
 // GET /api/parcels — list (admin/warehouse see all; customer sees own)
 router.get('/', authenticate, parcelController.list);
 
