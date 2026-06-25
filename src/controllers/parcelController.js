@@ -336,6 +336,7 @@ const getByTrackingNumber = async (req, res, next) => {
       .from('parcels')
       .select(`
         *,
+        customers(id, customer_code, first_name, last_name),
         warehouses(name),
         parcel_status_history(status, notes, created_at)
       `)
@@ -355,6 +356,12 @@ const getByTrackingNumber = async (req, res, next) => {
       warehouse_name: parcel.warehouses ? parcel.warehouses.name : null,
       arrival_date: parcel.arrival_date,
       updated_at: parcel.updated_at,
+      customer: parcel.customers ? {
+        id: parcel.customers.id,
+        customer_code: parcel.customers.customer_code,
+        first_name: parcel.customers.first_name,
+        last_name: parcel.customers.last_name
+      } : null,
       status_history: (parcel.parcel_status_history || []).map(h => ({
         status: h.status,
         note: h.notes,
