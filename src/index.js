@@ -8,6 +8,7 @@ const routes = require('./routes/index');
 const { errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
+app.set('trust proxy', 1); // Trust first proxy (Render reverse proxy)
 const PORT = process.env.PORT || 3001;
 
 // ─── Security middleware ────────────────────────────────────────────────────
