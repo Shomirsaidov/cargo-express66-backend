@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/supabase');
+const notificationService = require('../services/notificationService');
 
 /**
  * GET /api/tracking — list customer's tracking numbers
@@ -48,6 +49,48 @@ const create = async (req, res, next) => {
       return res.status(409).json({ error: 'Tracking number already added' });
     }
 
+    // Check if a parcel with this tracking number already exists in the system without a customer
+    const { data: existingParcel } = await supabaseAdmin
+      .from('parcels')
+      .select('*')
+      .eq('tracking_number', tracking_number.trim())
+      .single();
+
+    let isLinked = false;
+
+    if (existingParcel && !existingParcel.customer_id) {
+      isLinked = true;
+      const newStatus = existingParcel.status === 'unknown_recipient' ? 'received_at_warehouse' : existingParcel.status;
+
+      // Update parcel with the customer ID and correct status
+      const { data: updatedParcel, error: updateError } = await supabaseAdmin
+        .from('parcels')
+        .update({
+          customer_id: req.user.id,
+          status: newStatus
+        })
+        .eq('id', existingParcel.id)
+        .select('*, customers(id, customer_code, first_name, last_name, email), warehouses(id, name, country)')
+        .single();
+
+      if (!updateError && updatedParcel) {
+        // Add to status history
+        await supabaseAdmin.from('parcel_status_history').insert({
+          parcel_id: updatedParcel.id,
+          status: newStatus,
+          notes: 'Parcel linked to customer account',
+          changed_by: req.user.id
+        });
+
+        // Notify customer
+        try {
+          await notificationService.notifyParcelStatus(updatedParcel, newStatus);
+        } catch (notifErr) {
+          console.error('Failed to notify customer on auto-link:', notifErr);
+        }
+      }
+    }
+
     const { data, error } = await supabaseAdmin
       .from('tracking_numbers')
       .insert({
@@ -57,7 +100,7 @@ const create = async (req, res, next) => {
         country_of_origin: country_of_origin || null,
         warehouse_id: warehouse_id || null,
         notes: notes || null,
-        is_linked: false,
+        is_linked: isLinked,
       })
       .select('*, warehouses(name, country)')
       .single();
