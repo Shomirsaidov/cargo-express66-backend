@@ -238,6 +238,8 @@ const handleScan = async (tracking_number, scanningUser) => {
         country_of_origin: linkResult.tracking_record.country_of_origin,
         warehouse_id: linkResult.tracking_record.warehouse_id,
         notes: linkResult.tracking_record.notes,
+        declared_value: linkResult.tracking_record.declared_value,
+        additional_services: linkResult.tracking_record.additional_services,
       },
       message: 'Tracking number found — customer pre-registered. Enter weight to complete.',
     };
