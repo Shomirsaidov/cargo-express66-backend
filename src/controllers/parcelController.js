@@ -139,7 +139,7 @@ const create = async (req, res, next) => {
       declared_value: declared_value ? parseFloat(declared_value) : null,
       notes: notes || null,
       photos: photoUrls,
-      service_ids: service_ids ? JSON.parse(service_ids) : [],
+      service_ids: service_ids ? (typeof service_ids === 'string' ? JSON.parse(service_ids) : service_ids) : [],
       changed_by: req.user.id,
     });
 
