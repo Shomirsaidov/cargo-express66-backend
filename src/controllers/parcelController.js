@@ -36,7 +36,8 @@ const list = async (req, res, next) => {
         `*,
         customers(id, customer_code, first_name, last_name, email),
         warehouses(id, name, country),
-        airway_bills(id, awb_number, status)`,
+        airway_bills(id, awb_number, status),
+        parcel_services(id, cost, additional_services(id, name, description))`,
         { count: 'exact' }
       )
       .order('created_at', { ascending: false })
@@ -209,6 +210,59 @@ const update = async (req, res, next) => {
     if (customer_id && !existing.customer_id && existing.status === 'unknown_recipient') {
       updates.status = 'received_at_warehouse';
       autoLinked = true;
+    }
+
+    // Recalculate costs if weight, declared_value, or warehouse_id changed
+    if (weight !== undefined || declared_value !== undefined || warehouse_id !== undefined || req.body.service_ids !== undefined) {
+      let serviceIds = [];
+      if (req.body.service_ids !== undefined) {
+        serviceIds = Array.isArray(req.body.service_ids) ? req.body.service_ids : JSON.parse(req.body.service_ids);
+      } else {
+        const { data: currentServices } = await supabaseAdmin
+          .from('parcel_services')
+          .select('service_id')
+          .eq('parcel_id', req.params.id);
+        if (currentServices) {
+          serviceIds = currentServices.map(s => s.service_id);
+        }
+      }
+
+      const pWeight = weight !== undefined ? parseFloat(weight) : existing.weight;
+      const pDeclaredValue = declared_value !== undefined ? parseFloat(declared_value) : existing.declared_value;
+      const pWarehouseId = warehouse_id !== undefined ? warehouse_id : existing.warehouse_id;
+
+      const parcelService = require('../services/parcelService');
+      try {
+        const costs = await parcelService.computeCosts({
+          warehouse_id: pWarehouseId,
+          weight: pWeight,
+          declared_value: pDeclaredValue,
+          service_ids: serviceIds
+        });
+
+        updates.insurance_cost = costs.insurance_cost;
+        updates.additional_services_cost = costs.additional_services_cost;
+        updates.total_cost = costs.total_cost;
+
+        // If service_ids was passed, update the parcel_services relation
+        if (req.body.service_ids !== undefined) {
+          await supabaseAdmin
+            .from('parcel_services')
+            .delete()
+            .eq('parcel_id', req.params.id);
+
+          if (costs.service_details.length > 0) {
+            const serviceRows = costs.service_details.map((s) => ({
+              parcel_id: req.params.id,
+              service_id: s.service_id,
+              cost: s.cost,
+            }));
+            await supabaseAdmin.from('parcel_services').insert(serviceRows);
+          }
+        }
+      } catch (costErr) {
+        console.error('Failed to recalculate parcel costs on update:', costErr);
+      }
     }
 
     const { data, error } = await supabaseAdmin

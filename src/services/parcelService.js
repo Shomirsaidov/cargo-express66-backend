@@ -108,15 +108,27 @@ const createParcel = async ({
   service_ids = [],
   changed_by,
 }) => {
-  // Try to auto-link customer from tracking_numbers if not provided
-  let linkedCustomerId = customer_id;
-  let trackingRecord = null;
+  // Try to find pre-registered tracking number in all cases
+  const { data: trackingRecord } = await supabaseAdmin
+    .from('tracking_numbers')
+    .select('*')
+    .eq('tracking_number', tracking_number.trim())
+    .eq('is_linked', false)
+    .single();
 
-  if (!linkedCustomerId) {
-    const linkResult = await linkTrackingNumber(tracking_number);
-    if (linkResult) {
-      linkedCustomerId = linkResult.customer.id;
-      trackingRecord = linkResult.tracking_record;
+  let linkedCustomerId = customer_id;
+  if (trackingRecord) {
+    if (!linkedCustomerId) {
+      linkedCustomerId = trackingRecord.customer_id;
+    }
+    // Merge pre-registered additional services
+    if (Array.isArray(trackingRecord.additional_services)) {
+      const uniqueServices = new Set([...service_ids, ...trackingRecord.additional_services]);
+      service_ids = Array.from(uniqueServices);
+    }
+    // Inherit declared value if not provided
+    if (declared_value === undefined || declared_value === null) {
+      declared_value = trackingRecord.declared_value;
     }
   }
 
@@ -239,4 +251,65 @@ const handleScan = async (tracking_number, scanningUser) => {
   };
 };
 
-module.exports = { linkTrackingNumber, computeCosts, createParcel, handleScan };
+/**
+ * Helper to update and recalculate services & costs for a parcel
+ */
+const updateParcelServicesAndCosts = async (parcelId, serviceIds, declaredValue, weight, warehouseId) => {
+  try {
+    let pWeight = weight;
+    let pDeclaredValue = declaredValue;
+    let pWarehouseId = warehouseId;
+
+    if (pWeight === undefined || pDeclaredValue === undefined || pWarehouseId === undefined) {
+      const { data: parcel } = await supabaseAdmin
+        .from('parcels')
+        .select('weight, declared_value, warehouse_id')
+        .eq('id', parcelId)
+        .single();
+      if (parcel) {
+        if (pWeight === undefined) pWeight = parcel.weight;
+        if (pDeclaredValue === undefined) pDeclaredValue = parcel.declared_value;
+        if (pWarehouseId === undefined) pWarehouseId = parcel.warehouse_id;
+      }
+    }
+
+    const costs = await computeCosts({
+      warehouse_id: pWarehouseId,
+      weight: pWeight,
+      declared_value: pDeclaredValue,
+      service_ids: serviceIds,
+    });
+
+    await supabaseAdmin
+      .from('parcels')
+      .update({
+        declared_value: pDeclaredValue,
+        insurance_cost: costs.insurance_cost,
+        additional_services_cost: costs.additional_services_cost,
+        total_cost: costs.total_cost,
+      })
+      .eq('id', parcelId);
+
+    // Update parcel_services
+    await supabaseAdmin
+      .from('parcel_services')
+      .delete()
+      .eq('parcel_id', parcelId);
+
+    if (costs.service_details.length > 0) {
+      const serviceRows = costs.service_details.map((s) => ({
+        parcel_id: parcelId,
+        service_id: s.service_id,
+        cost: s.cost,
+      }));
+      await supabaseAdmin.from('parcel_services').insert(serviceRows);
+    }
+
+    return costs;
+  } catch (err) {
+    console.error('updateParcelServicesAndCosts error:', err);
+    throw err;
+  }
+};
+
+module.exports = { linkTrackingNumber, computeCosts, createParcel, handleScan, updateParcelServicesAndCosts };

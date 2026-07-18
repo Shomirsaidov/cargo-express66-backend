@@ -35,7 +35,7 @@ const create = async (req, res, next) => {
       return res.status(422).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { tracking_number, store_name, country_of_origin, warehouse_id, notes } = req.body;
+    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value } = req.body;
 
     // Check for duplicate tracking number for this customer
     const { data: existing } = await supabaseAdmin
@@ -67,13 +67,28 @@ const create = async (req, res, next) => {
         .from('parcels')
         .update({
           customer_id: req.user.id,
-          status: newStatus
+          status: newStatus,
+          declared_value: declared_value || 0
         })
         .eq('id', existingParcel.id)
         .select('*, customers(id, customer_code, first_name, last_name, email), warehouses(id, name, country)')
         .single();
 
       if (!updateError && updatedParcel) {
+        // Recalculate costs and attach services selected by the customer
+        const parcelService = require('../services/parcelService');
+        try {
+          await parcelService.updateParcelServicesAndCosts(
+            updatedParcel.id,
+            additional_services || [],
+            declared_value || 0,
+            updatedParcel.weight,
+            updatedParcel.warehouse_id
+          );
+        } catch (costErr) {
+          console.error('Failed to update parcel costs on auto-link:', costErr);
+        }
+
         // Add to status history
         await supabaseAdmin.from('parcel_status_history').insert({
           parcel_id: updatedParcel.id,
@@ -101,6 +116,8 @@ const create = async (req, res, next) => {
         warehouse_id: warehouse_id || null,
         notes: notes || null,
         is_linked: isLinked,
+        additional_services: additional_services || [],
+        declared_value: declared_value || 0
       })
       .select('*, warehouses(name, country)')
       .single();
@@ -135,13 +152,15 @@ const update = async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    const { tracking_number, store_name, country_of_origin, warehouse_id, notes } = req.body;
+    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value } = req.body;
     const updates = {};
     if (tracking_number !== undefined) updates.tracking_number = tracking_number.trim();
     if (store_name !== undefined) updates.store_name = store_name;
     if (country_of_origin !== undefined) updates.country_of_origin = country_of_origin;
     if (warehouse_id !== undefined) updates.warehouse_id = warehouse_id;
     if (notes !== undefined) updates.notes = notes;
+    if (additional_services !== undefined) updates.additional_services = additional_services;
+    if (declared_value !== undefined) updates.declared_value = declared_value;
 
     const { data, error } = await supabaseAdmin
       .from('tracking_numbers')
@@ -151,6 +170,30 @@ const update = async (req, res, next) => {
       .single();
 
     if (error) throw error;
+
+    // If already linked, sync services and costs with the parcel
+    if (data.is_linked && (additional_services !== undefined || declared_value !== undefined)) {
+      const { data: parcel } = await supabaseAdmin
+        .from('parcels')
+        .select('id, weight, warehouse_id')
+        .eq('tracking_number', data.tracking_number)
+        .single();
+      if (parcel) {
+        const parcelService = require('../services/parcelService');
+        try {
+          await parcelService.updateParcelServicesAndCosts(
+            parcel.id,
+            additional_services !== undefined ? additional_services : data.additional_services,
+            declared_value !== undefined ? declared_value : data.declared_value,
+            parcel.weight,
+            parcel.warehouse_id
+          );
+        } catch (costErr) {
+          console.error('Failed to sync parcel costs on update:', costErr);
+        }
+      }
+    }
+
     res.json({ data });
   } catch (err) {
     next(err);
