@@ -9,7 +9,7 @@ const buildWeeklyReportData = async (startDate, endDate) => {
   const { data, error } = await supabaseAdmin
     .from('parcels')
     .select(
-      `id, tracking_number, weight, status, arrival_date, shipment_date, delivery_date, total_cost, notes,
+      `id, tracking_number, weight, status, arrival_date, shipment_date, delivery_date, total_cost, notes, product_description, product_link,
        customers(id, customer_code, first_name, last_name, email),
        warehouses(id, name, country)`
     )
@@ -40,7 +40,7 @@ const generateExcel = async (reportData) => {
   const sheet = workbook.addWorksheet('Weekly Report');
 
   // Title row
-  sheet.mergeCells('A1:J1');
+  sheet.mergeCells('A1:L1');
   const titleCell = sheet.getCell('A1');
   titleCell.value = `Cargo Express 66 — Weekly Report (${reportData.startDate} to ${reportData.endDate})`;
   titleCell.font = { bold: true, size: 14, color: { argb: 'FF6997CF' } };
@@ -48,7 +48,7 @@ const generateExcel = async (reportData) => {
   sheet.getRow(1).height = 30;
 
   // Summary row
-  sheet.mergeCells('A2:J2');
+  sheet.mergeCells('A2:L2');
   const summaryCell = sheet.getCell('A2');
   summaryCell.value = `Total Parcels: ${reportData.totalParcels}  |  Total Weight: ${reportData.totalWeight.toFixed(2)} kg  |  Total Revenue: $${reportData.totalRevenue.toFixed(2)}`;
   summaryCell.font = { bold: true, size: 11 };
@@ -66,6 +66,8 @@ const generateExcel = async (reportData) => {
     { header: 'Status', key: 'status', width: 22 },
     { header: 'Arrival Date', key: 'arrival_date', width: 15 },
     { header: 'Total Cost ($)', key: 'total_cost', width: 14 },
+    { header: 'Product Description', key: 'product_description', width: 30 },
+    { header: 'Product Link', key: 'product_link', width: 30 },
     { header: 'Notes', key: 'notes', width: 30 },
   ];
 
@@ -98,6 +100,8 @@ const generateExcel = async (reportData) => {
       status: (parcel.status || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
       arrival_date: parcel.arrival_date ? parcel.arrival_date.split('T')[0] : '-',
       total_cost: parcel.total_cost ? parseFloat(parcel.total_cost).toFixed(2) : '0.00',
+      product_description: parcel.product_description || '',
+      product_link: parcel.product_link || '',
       notes: parcel.notes || '',
     });
 
@@ -136,6 +140,8 @@ const generateCSV = async (reportData) => {
     'Status',
     'Arrival Date',
     'Total Cost ($)',
+    'Product Description',
+    'Product Link',
     'Notes',
   ];
 
@@ -154,6 +160,8 @@ const generateCSV = async (reportData) => {
       (parcel.status || '').replace(/_/g, ' '),
       parcel.arrival_date ? parcel.arrival_date.split('T')[0] : '-',
       parcel.total_cost ? parseFloat(parcel.total_cost).toFixed(2) : '0.00',
+      `"${(parcel.product_description || '').replace(/"/g, '""')}"`,
+      `"${(parcel.product_link || '').replace(/"/g, '""')}"`,
       `"${(parcel.notes || '').replace(/"/g, '""')}"`,
     ].join(',');
   });
@@ -205,13 +213,13 @@ const generatePDF = async (reportData, startDate, endDate) => {
 
     // Table
     const tableTop = 185;
-    const colWidths = [30, 120, 110, 80, 60, 100, 110, 80, 70];
-    const colHeaders = ['#', 'Tracking Number', 'Customer', 'Customer ID', 'Weight', 'Warehouse', 'Status', 'Date', 'Cost ($)'];
+    const colWidths = [20, 80, 80, 45, 35, 60, 60, 50, 40, 140, 130];
+    const colHeaders = ['#', 'Tracking Number', 'Customer', 'Customer ID', 'Weight', 'Warehouse', 'Status', 'Date', 'Cost ($)', 'Description', 'Link'];
     const startX = 40;
 
     // Table header
     doc.rect(startX, tableTop - 5, 740, 20).fill(BLUE);
-    doc.fillColor('#FFFFFF').fontSize(9).font('Helvetica-Bold');
+    doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
 
     let xPos = startX + 2;
     colHeaders.forEach((header, i) => {
@@ -222,7 +230,7 @@ const generatePDF = async (reportData, startDate, endDate) => {
     // Table rows
     let yPos = tableTop + 20;
     const rowHeight = 18;
-    doc.fontSize(8).font('Helvetica');
+    doc.fontSize(7).font('Helvetica');
 
     reportData.parcels.forEach((parcel, index) => {
       if (yPos > doc.page.height - 60) {
@@ -230,14 +238,14 @@ const generatePDF = async (reportData, startDate, endDate) => {
         yPos = 40;
         // Re-draw header on new page
         doc.rect(startX, yPos - 5, 740, 20).fill(BLUE);
-        doc.fillColor('#FFFFFF').fontSize(9).font('Helvetica-Bold');
+        doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
         xPos = startX + 2;
         colHeaders.forEach((header, i) => {
           doc.text(header, xPos, yPos, { width: colWidths[i] - 4, ellipsis: true });
           xPos += colWidths[i];
         });
         yPos += 20;
-        doc.fontSize(8).font('Helvetica');
+        doc.fontSize(7).font('Helvetica');
       }
 
       // Alternate row bg
@@ -259,6 +267,8 @@ const generatePDF = async (reportData, startDate, endDate) => {
         (parcel.status || '').replace(/_/g, ' '),
         parcel.arrival_date ? parcel.arrival_date.split('T')[0] : '-',
         parcel.total_cost ? `$${parseFloat(parcel.total_cost).toFixed(2)}` : '$0.00',
+        parcel.product_description || '-',
+        parcel.product_link || '-',
       ];
 
       doc.fillColor(DARK);

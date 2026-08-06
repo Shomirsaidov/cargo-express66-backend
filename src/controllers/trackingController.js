@@ -35,7 +35,7 @@ const create = async (req, res, next) => {
       return res.status(422).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name } = req.body;
+    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link } = req.body;
 
     // Check for duplicate tracking number for this customer
     const { data: existing } = await supabaseAdmin
@@ -62,14 +62,16 @@ const create = async (req, res, next) => {
       isLinked = true;
       const newStatus = existingParcel.status === 'unknown_recipient' ? 'received_at_warehouse' : existingParcel.status;
 
-      // Update parcel with the customer ID, correct status, and recipient name
+      // Update parcel with the customer ID, correct status, recipient name, and product details
       const { data: updatedParcel, error: updateError } = await supabaseAdmin
         .from('parcels')
         .update({
           customer_id: req.user.id,
           status: newStatus,
           declared_value: declared_value || 0,
-          recipient_name: recipient_name || null
+          recipient_name: recipient_name || null,
+          product_description: product_description || null,
+          product_link: product_link || null
         })
         .eq('id', existingParcel.id)
         .select('*, customers(id, customer_code, first_name, last_name, email), warehouses(id, name, country)')
@@ -119,7 +121,9 @@ const create = async (req, res, next) => {
         is_linked: isLinked,
         additional_services: additional_services || [],
         declared_value: declared_value || 0,
-        recipient_name: recipient_name || null
+        recipient_name: recipient_name || null,
+        product_description: product_description || null,
+        product_link: product_link || null
       })
       .select('*, warehouses(name, country)')
       .single();
@@ -154,7 +158,7 @@ const update = async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-     const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name } = req.body;
+     const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link } = req.body;
      const updates = {};
      if (tracking_number !== undefined) updates.tracking_number = tracking_number.trim();
      if (store_name !== undefined) updates.store_name = store_name;
@@ -164,6 +168,8 @@ const update = async (req, res, next) => {
      if (additional_services !== undefined) updates.additional_services = additional_services;
      if (declared_value !== undefined) updates.declared_value = declared_value;
      if (recipient_name !== undefined) updates.recipient_name = recipient_name;
+     if (product_description !== undefined) updates.product_description = product_description;
+     if (product_link !== undefined) updates.product_link = product_link;
 
      const { data, error } = await supabaseAdmin
        .from('tracking_numbers')
@@ -174,7 +180,7 @@ const update = async (req, res, next) => {
 
      if (error) throw error;
 
-     // If already linked, sync services, costs, and recipient with the parcel
+     // If already linked, sync services, costs, and recipient/details with the parcel
      if (data.is_linked) {
        const { data: parcel } = await supabaseAdmin
          .from('parcels')
@@ -182,10 +188,15 @@ const update = async (req, res, next) => {
          .eq('tracking_number', data.tracking_number)
          .single();
        if (parcel) {
-         if (recipient_name !== undefined) {
+         const parcelUpdates = {};
+         if (recipient_name !== undefined) parcelUpdates.recipient_name = recipient_name;
+         if (product_description !== undefined) parcelUpdates.product_description = product_description;
+         if (product_link !== undefined) parcelUpdates.product_link = product_link;
+         
+         if (Object.keys(parcelUpdates).length > 0) {
            await supabaseAdmin
              .from('parcels')
-             .update({ recipient_name })
+             .update(parcelUpdates)
              .eq('id', parcel.id);
          }
          if (additional_services !== undefined || declared_value !== undefined) {

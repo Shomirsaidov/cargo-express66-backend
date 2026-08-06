@@ -107,6 +107,8 @@ const createParcel = async ({
   service_ids = [],
   changed_by,
   recipient_name,
+  product_description,
+  product_link,
 }) => {
   // Try to find pre-registered tracking number in all cases
   const { data: trackingRecord } = await supabaseAdmin
@@ -117,6 +119,9 @@ const createParcel = async ({
     .single();
 
   let linkedCustomerId = customer_id;
+  let finalDescription = product_description;
+  let finalLink = product_link;
+
   if (trackingRecord) {
     if (!linkedCustomerId) {
       linkedCustomerId = trackingRecord.customer_id;
@@ -133,6 +138,13 @@ const createParcel = async ({
     // Inherit recipient name if not provided
     if (!recipient_name) {
       recipient_name = trackingRecord.recipient_name;
+    }
+    // Inherit description and link if not provided
+    if (!finalDescription) {
+      finalDescription = trackingRecord.product_description;
+    }
+    if (!finalLink) {
+      finalLink = trackingRecord.product_link;
     }
   }
 
@@ -165,6 +177,8 @@ const createParcel = async ({
       notes,
       photos,
       recipient_name,
+      product_description: finalDescription || null,
+      product_link: finalLink || null,
     })
     .select('*, customers(id, customer_code, first_name, last_name, email), warehouses(id, name, country)')
     .single();
@@ -246,6 +260,8 @@ const handleScan = async (tracking_number, scanningUser) => {
         declared_value: linkResult.tracking_record.declared_value,
         additional_services: linkResult.tracking_record.additional_services,
         recipient_name: linkResult.tracking_record.recipient_name,
+        product_description: linkResult.tracking_record.product_description,
+        product_link: linkResult.tracking_record.product_link,
       },
       message: 'Tracking number found — customer pre-registered. Enter weight to complete.',
     };
