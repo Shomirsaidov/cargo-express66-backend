@@ -117,6 +117,7 @@ const create = async (req, res, next) => {
       declared_value,
       notes,
       service_ids,
+      recipient_name,
     } = req.body;
 
     // Upload photos if provided
@@ -141,6 +142,7 @@ const create = async (req, res, next) => {
       photos: photoUrls,
       service_ids: service_ids ? (typeof service_ids === 'string' ? JSON.parse(service_ids) : service_ids) : [],
       changed_by: req.user.id,
+      recipient_name: recipient_name || null,
     });
 
     res.status(201).json({ data: parcel });
@@ -173,6 +175,7 @@ const update = async (req, res, next) => {
       arrival_date,
       shipment_date,
       delivery_date,
+      recipient_name,
     } = req.body;
 
     const updates = {};
@@ -186,6 +189,7 @@ const update = async (req, res, next) => {
     if (arrival_date !== undefined) updates.arrival_date = arrival_date;
     if (shipment_date !== undefined) updates.shipment_date = shipment_date;
     if (delivery_date !== undefined) updates.delivery_date = delivery_date;
+    if (recipient_name !== undefined) updates.recipient_name = recipient_name;
 
     // Handle new photos
     let existingPhotos = existing.photos || [];

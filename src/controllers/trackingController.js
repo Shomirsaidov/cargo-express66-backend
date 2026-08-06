@@ -35,7 +35,7 @@ const create = async (req, res, next) => {
       return res.status(422).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value } = req.body;
+    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name } = req.body;
 
     // Check for duplicate tracking number for this customer
     const { data: existing } = await supabaseAdmin
@@ -62,13 +62,14 @@ const create = async (req, res, next) => {
       isLinked = true;
       const newStatus = existingParcel.status === 'unknown_recipient' ? 'received_at_warehouse' : existingParcel.status;
 
-      // Update parcel with the customer ID and correct status
+      // Update parcel with the customer ID, correct status, and recipient name
       const { data: updatedParcel, error: updateError } = await supabaseAdmin
         .from('parcels')
         .update({
           customer_id: req.user.id,
           status: newStatus,
-          declared_value: declared_value || 0
+          declared_value: declared_value || 0,
+          recipient_name: recipient_name || null
         })
         .eq('id', existingParcel.id)
         .select('*, customers(id, customer_code, first_name, last_name, email), warehouses(id, name, country)')
@@ -117,7 +118,8 @@ const create = async (req, res, next) => {
         notes: notes || null,
         is_linked: isLinked,
         additional_services: additional_services || [],
-        declared_value: declared_value || 0
+        declared_value: declared_value || 0,
+        recipient_name: recipient_name || null
       })
       .select('*, warehouses(name, country)')
       .single();
@@ -152,47 +154,56 @@ const update = async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value } = req.body;
-    const updates = {};
-    if (tracking_number !== undefined) updates.tracking_number = tracking_number.trim();
-    if (store_name !== undefined) updates.store_name = store_name;
-    if (country_of_origin !== undefined) updates.country_of_origin = country_of_origin;
-    if (warehouse_id !== undefined) updates.warehouse_id = warehouse_id;
-    if (notes !== undefined) updates.notes = notes;
-    if (additional_services !== undefined) updates.additional_services = additional_services;
-    if (declared_value !== undefined) updates.declared_value = declared_value;
+     const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name } = req.body;
+     const updates = {};
+     if (tracking_number !== undefined) updates.tracking_number = tracking_number.trim();
+     if (store_name !== undefined) updates.store_name = store_name;
+     if (country_of_origin !== undefined) updates.country_of_origin = country_of_origin;
+     if (warehouse_id !== undefined) updates.warehouse_id = warehouse_id;
+     if (notes !== undefined) updates.notes = notes;
+     if (additional_services !== undefined) updates.additional_services = additional_services;
+     if (declared_value !== undefined) updates.declared_value = declared_value;
+     if (recipient_name !== undefined) updates.recipient_name = recipient_name;
 
-    const { data, error } = await supabaseAdmin
-      .from('tracking_numbers')
-      .update(updates)
-      .eq('id', req.params.id)
-      .select('*, warehouses(name, country)')
-      .single();
+     const { data, error } = await supabaseAdmin
+       .from('tracking_numbers')
+       .update(updates)
+       .eq('id', req.params.id)
+       .select('*, warehouses(name, country)')
+       .single();
 
-    if (error) throw error;
+     if (error) throw error;
 
-    // If already linked, sync services and costs with the parcel
-    if (data.is_linked && (additional_services !== undefined || declared_value !== undefined)) {
-      const { data: parcel } = await supabaseAdmin
-        .from('parcels')
-        .select('id, weight, warehouse_id')
-        .eq('tracking_number', data.tracking_number)
-        .single();
-      if (parcel) {
-        const parcelService = require('../services/parcelService');
-        try {
-          await parcelService.updateParcelServicesAndCosts(
-            parcel.id,
-            additional_services !== undefined ? additional_services : data.additional_services,
-            declared_value !== undefined ? declared_value : data.declared_value,
-            parcel.weight,
-            parcel.warehouse_id
-          );
-        } catch (costErr) {
-          console.error('Failed to sync parcel costs on update:', costErr);
-        }
-      }
-    }
+     // If already linked, sync services, costs, and recipient with the parcel
+     if (data.is_linked) {
+       const { data: parcel } = await supabaseAdmin
+         .from('parcels')
+         .select('id, weight, warehouse_id')
+         .eq('tracking_number', data.tracking_number)
+         .single();
+       if (parcel) {
+         if (recipient_name !== undefined) {
+           await supabaseAdmin
+             .from('parcels')
+             .update({ recipient_name })
+             .eq('id', parcel.id);
+         }
+         if (additional_services !== undefined || declared_value !== undefined) {
+           const parcelService = require('../services/parcelService');
+           try {
+             await parcelService.updateParcelServicesAndCosts(
+               parcel.id,
+               additional_services !== undefined ? additional_services : data.additional_services,
+               declared_value !== undefined ? declared_value : data.declared_value,
+               parcel.weight,
+               parcel.warehouse_id
+             );
+           } catch (costErr) {
+             console.error('Failed to sync parcel costs on update:', costErr);
+           }
+         }
+       }
+     }
 
     res.json({ data });
   } catch (err) {

@@ -122,6 +122,7 @@ CREATE TABLE public.parcels (
     delivery_date TIMESTAMPTZ,
     notes TEXT,
     photos TEXT[] DEFAULT '{}',
+    recipient_name TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -157,6 +158,7 @@ CREATE TABLE public.tracking_numbers (
     is_linked BOOLEAN NOT NULL DEFAULT false,
     additional_services UUID[] DEFAULT '{}',
     declared_value NUMERIC DEFAULT 0,
+    recipient_name TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uq_customer_tracking UNIQUE (customer_id, tracking_number)
