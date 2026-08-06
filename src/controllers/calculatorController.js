@@ -12,23 +12,49 @@ const calculate = async (req, res, next) => {
       return res.status(422).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { country, weight, service_ids = [] } = req.body;
-    const weightKg = parseFloat(weight);
+    const { country, weight, service_ids = [], item_type = 'regular' } = req.body;
+    const weightKg = parseFloat(weight || 0);
 
-    // Fetch tariff for the country
-    const { data: tariff, error: tariffError } = await supabaseAdmin
+    // Fetch tariff for the country for display info (fallback is USA if not found)
+    let tariff = null;
+    const { data: tariffData } = await supabaseAdmin
       .from('tariffs')
       .select('*')
       .eq('is_active', true)
       .ilike('country', country)
       .single();
-
-    if (tariffError || !tariff) {
-      return res.status(404).json({ error: `No active tariff found for country: ${country}` });
+    if (tariffData) {
+      tariff = tariffData;
+    } else {
+      tariff = { id: 'd6f43e01-6b24-4893-bc24-be2ef2f94567', price_per_kg: 16.00, minimum_charge: 16.00, delivery_time: '7-10 days' };
     }
 
-    // Base delivery cost
-    const baseCost = Math.max(weightKg * tariff.price_per_kg, tariff.minimum_charge);
+    // Base delivery cost calculation
+    let baseCost = 0;
+    const techRates = {
+      macbook: 100,
+      laptop: 100,
+      iphone: 100,
+      watch: 30,
+      ipad: 70,
+      airpods: 20,
+      meta_glasses: 20,
+      airpods_max: 25,
+      ebook: 15
+    };
+
+    if (item_type && techRates[item_type]) {
+      baseCost = techRates[item_type];
+    } else {
+      const calculatedWeight = weightKg < 1.0 ? 1.0 : weightKg;
+      let rate = 16;
+      if (calculatedWeight >= 1000) {
+        rate = 11;
+      } else if (calculatedWeight >= 100) {
+        rate = 15;
+      }
+      baseCost = calculatedWeight * rate;
+    }
 
     // Calculate additional services cost
     let servicesCost = 0;

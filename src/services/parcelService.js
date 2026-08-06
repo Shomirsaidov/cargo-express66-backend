@@ -36,17 +36,16 @@ const computeCosts = async ({ warehouse_id, weight, declared_value, service_ids 
     .eq('id', warehouse_id)
     .single();
 
-  if (warehouse && weight) {
-    const { data: tariff } = await supabaseAdmin
-      .from('tariffs')
-      .select('*')
-      .eq('is_active', true)
-      .ilike('country', warehouse.country)
-      .single();
-
-    if (tariff) {
-      deliveryCost = Math.max(weight * tariff.price_per_kg, tariff.minimum_charge);
+  if (weight) {
+    const weightKg = parseFloat(weight);
+    const calculatedWeight = weightKg < 1.0 ? 1.0 : weightKg;
+    let rate = 16;
+    if (calculatedWeight >= 1000) {
+      rate = 11;
+    } else if (calculatedWeight >= 100) {
+      rate = 15;
     }
+    deliveryCost = calculatedWeight * rate;
   }
 
   // Calculate services
