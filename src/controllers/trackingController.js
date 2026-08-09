@@ -1,6 +1,7 @@
 const { validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/supabase');
 const notificationService = require('../services/notificationService');
+const { filterPayload } = require('../utils/schema');
 
 /**
  * GET /api/tracking — list customer's tracking numbers
@@ -63,17 +64,19 @@ const create = async (req, res, next) => {
       const newStatus = existingParcel.status === 'unknown_recipient' ? 'received_at_warehouse' : existingParcel.status;
 
       // Update parcel with the customer ID, correct status, recipient name, and product details
+      const parcelUpdatePayload = await filterPayload('parcels', {
+        customer_id: req.user.id,
+        status: newStatus,
+        declared_value: declared_value || 0,
+        recipient_name: recipient_name || null,
+        product_description: product_description || null,
+        product_link: product_link || null,
+        destination_country: destination_country || 'Таджикистан'
+      });
+
       const { data: updatedParcel, error: updateError } = await supabaseAdmin
         .from('parcels')
-        .update({
-          customer_id: req.user.id,
-          status: newStatus,
-          declared_value: declared_value || 0,
-          recipient_name: recipient_name || null,
-          product_description: product_description || null,
-          product_link: product_link || null,
-          destination_country: destination_country || 'Таджикистан'
-        })
+        .update(parcelUpdatePayload)
         .eq('id', existingParcel.id)
         .select('*, customers(id, customer_code, first_name, last_name, email), warehouses(id, name, country)')
         .single();
@@ -110,23 +113,25 @@ const create = async (req, res, next) => {
       }
     }
 
+    const trackingInsertPayload = await filterPayload('tracking_numbers', {
+      customer_id: req.user.id,
+      tracking_number: tracking_number.trim(),
+      store_name: store_name || null,
+      country_of_origin: country_of_origin || null,
+      warehouse_id: warehouse_id || null,
+      notes: notes || null,
+      is_linked: isLinked,
+      additional_services: additional_services || [],
+      declared_value: declared_value || 0,
+      recipient_name: recipient_name || null,
+      product_description: product_description || null,
+      product_link: product_link || null,
+      destination_country: destination_country || 'Таджикистан'
+    });
+
     const { data, error } = await supabaseAdmin
       .from('tracking_numbers')
-      .insert({
-        customer_id: req.user.id,
-        tracking_number: tracking_number.trim(),
-        store_name: store_name || null,
-        country_of_origin: country_of_origin || null,
-        warehouse_id: warehouse_id || null,
-        notes: notes || null,
-        is_linked: isLinked,
-        additional_services: additional_services || [],
-        declared_value: declared_value || 0,
-        recipient_name: recipient_name || null,
-        product_description: product_description || null,
-        product_link: product_link || null,
-        destination_country: destination_country || 'Таджикистан'
-      })
+      .insert(trackingInsertPayload)
       .select('*, warehouses(name, country)')
       .single();
 
@@ -174,9 +179,11 @@ const update = async (req, res, next) => {
      if (product_link !== undefined) updates.product_link = product_link;
      if (destination_country !== undefined) updates.destination_country = destination_country;
 
+     const filteredUpdates = await filterPayload('tracking_numbers', updates);
+
      const { data, error } = await supabaseAdmin
        .from('tracking_numbers')
-       .update(updates)
+       .update(filteredUpdates)
        .eq('id', req.params.id)
        .select('*, warehouses(name, country)')
        .single();
@@ -192,17 +199,20 @@ const update = async (req, res, next) => {
          .single();
        if (parcel) {
          const parcelUpdates = {};
-         if (recipient_name !== undefined) parcelUpdates.recipient_name = recipient_name;
-         if (product_description !== undefined) parcelUpdates.product_description = product_description;
-         if (product_link !== undefined) parcelUpdates.product_link = product_link;
-         if (destination_country !== undefined) parcelUpdates.destination_country = destination_country;
-         
-         if (Object.keys(parcelUpdates).length > 0) {
-           await supabaseAdmin
-             .from('parcels')
-             .update(parcelUpdates)
-             .eq('id', parcel.id);
-         }
+          if (recipient_name !== undefined) parcelUpdates.recipient_name = recipient_name;
+          if (product_description !== undefined) parcelUpdates.product_description = product_description;
+          if (product_link !== undefined) parcelUpdates.product_link = product_link;
+          if (destination_country !== undefined) parcelUpdates.destination_country = destination_country;
+          
+          if (Object.keys(parcelUpdates).length > 0) {
+            const filteredParcelUpdates = await filterPayload('parcels', parcelUpdates);
+            if (Object.keys(filteredParcelUpdates).length > 0) {
+              await supabaseAdmin
+                .from('parcels')
+                .update(filteredParcelUpdates)
+                .eq('id', parcel.id);
+            }
+          }
          if (additional_services !== undefined || declared_value !== undefined) {
            const parcelService = require('../services/parcelService');
            try {

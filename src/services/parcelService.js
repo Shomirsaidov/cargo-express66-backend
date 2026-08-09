@@ -1,6 +1,7 @@
 const { supabaseAdmin } = require('../config/supabase');
 const { uploadToCloudinary } = require('../utils/cloudinaryUtils');
 const notificationService = require('./notificationService');
+const { filterPayload } = require('../utils/schema');
 
 /**
  * Find a customer by tracking number (from tracking_numbers table)
@@ -165,27 +166,29 @@ const createParcel = async ({
   });
 
   // Create parcel
+  const insertPayload = await filterPayload('parcels', {
+    tracking_number,
+    customer_id: linkedCustomerId || null,
+    warehouse_id,
+    weight,
+    dimensions,
+    declared_value,
+    insurance_cost: costs.insurance_cost,
+    additional_services_cost: costs.additional_services_cost,
+    total_cost: costs.total_cost,
+    status,
+    arrival_date: new Date().toISOString(),
+    notes,
+    photos,
+    recipient_name,
+    product_description: finalDescription || null,
+    product_link: finalLink || null,
+    destination_country: finalDestination || 'Таджикистан',
+  });
+
   const { data: parcel, error } = await supabaseAdmin
     .from('parcels')
-    .insert({
-      tracking_number,
-      customer_id: linkedCustomerId || null,
-      warehouse_id,
-      weight,
-      dimensions,
-      declared_value,
-      insurance_cost: costs.insurance_cost,
-      additional_services_cost: costs.additional_services_cost,
-      total_cost: costs.total_cost,
-      status,
-      arrival_date: new Date().toISOString(),
-      notes,
-      photos,
-      recipient_name,
-      product_description: finalDescription || null,
-      product_link: finalLink || null,
-      destination_country: finalDestination || 'Таджикистан',
-    })
+    .insert(insertPayload)
     .select('*, customers(id, customer_code, first_name, last_name, email), warehouses(id, name, country)')
     .single();
 

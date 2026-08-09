@@ -3,6 +3,7 @@ const { supabaseAdmin } = require('../config/supabase');
 const { uploadToCloudinary } = require('../utils/cloudinaryUtils');
 const parcelService = require('../services/parcelService');
 const notificationService = require('../services/notificationService');
+const { filterPayload } = require('../utils/schema');
 
 const VALID_STATUSES = [
   'awaiting_arrival',
@@ -281,9 +282,11 @@ const update = async (req, res, next) => {
       }
     }
 
+    const filteredUpdates = await filterPayload('parcels', updates);
+
     const { data, error } = await supabaseAdmin
       .from('parcels')
-      .update(updates)
+      .update(filteredUpdates)
       .eq('id', req.params.id)
       .select('*, customers(id, customer_code, first_name, last_name), warehouses(id, name, country)')
       .single();

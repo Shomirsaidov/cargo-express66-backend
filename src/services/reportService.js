@@ -1,18 +1,20 @@
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const { supabaseAdmin } = require('../config/supabase');
+const { getParcelsColumns } = require('../utils/schema');
 
 /**
  * Fetch parcel data for the given date range
  */
 const buildWeeklyReportData = async (startDate, endDate) => {
+  const allowedCols = await getParcelsColumns();
+  const selectString = `${allowedCols.join(', ')},
+     customers(id, customer_code, first_name, last_name, email),
+     warehouses(id, name, country)`;
+
   const { data, error } = await supabaseAdmin
     .from('parcels')
-    .select(
-      `id, tracking_number, weight, status, arrival_date, shipment_date, delivery_date, total_cost, notes, product_description, product_link, recipient_name, declared_value, destination_country,
-       customers(id, customer_code, first_name, last_name, email),
-       warehouses(id, name, country)`
-    )
+    .select(selectString)
     .gte('created_at', `${startDate}T00:00:00.000Z`)
     .lte('created_at', `${endDate}T23:59:59.999Z`)
     .order('created_at', { ascending: true });
