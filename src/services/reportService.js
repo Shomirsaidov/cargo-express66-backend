@@ -9,7 +9,7 @@ const buildWeeklyReportData = async (startDate, endDate) => {
   const { data, error } = await supabaseAdmin
     .from('parcels')
     .select(
-      `id, tracking_number, weight, status, arrival_date, shipment_date, delivery_date, total_cost, notes, product_description, product_link,
+      `id, tracking_number, weight, status, arrival_date, shipment_date, delivery_date, total_cost, notes, product_description, product_link, recipient_name, declared_value, destination_country,
        customers(id, customer_code, first_name, last_name, email),
        warehouses(id, name, country)`
     )
@@ -39,32 +39,35 @@ const generateExcel = async (reportData) => {
 
   const sheet = workbook.addWorksheet('Weekly Report');
 
-  // Title row
-  sheet.mergeCells('A1:L1');
+  // Title row - extended to O1 (15 columns)
+  sheet.mergeCells('A1:O1');
   const titleCell = sheet.getCell('A1');
   titleCell.value = `Cargo Express 66 — Weekly Report (${reportData.startDate} to ${reportData.endDate})`;
   titleCell.font = { bold: true, size: 14, color: { argb: 'FF6997CF' } };
   titleCell.alignment = { horizontal: 'center' };
   sheet.getRow(1).height = 30;
 
-  // Summary row
-  sheet.mergeCells('A2:L2');
+  // Summary row - extended to O2 (15 columns)
+  sheet.mergeCells('A2:O2');
   const summaryCell = sheet.getCell('A2');
   summaryCell.value = `Total Parcels: ${reportData.totalParcels}  |  Total Weight: ${reportData.totalWeight.toFixed(2)} kg  |  Total Revenue: $${reportData.totalRevenue.toFixed(2)}`;
   summaryCell.font = { bold: true, size: 11 };
   summaryCell.alignment = { horizontal: 'center' };
   sheet.getRow(2).height = 20;
 
-  // Header row
+  // Header row - 15 columns
   const headers = [
     { header: '#', key: 'num', width: 5 },
     { header: 'Tracking Number', key: 'tracking_number', width: 25 },
     { header: 'Customer Name', key: 'customer_name', width: 25 },
     { header: 'Customer ID', key: 'customer_code', width: 15 },
+    { header: 'Recipient Name', key: 'recipient_name', width: 25 },
     { header: 'Weight (kg)', key: 'weight', width: 12 },
+    { header: 'Destination Country', key: 'destination_country', width: 20 },
     { header: 'Warehouse', key: 'warehouse', width: 20 },
     { header: 'Status', key: 'status', width: 22 },
     { header: 'Arrival Date', key: 'arrival_date', width: 15 },
+    { header: 'Declared Value ($)', key: 'declared_value', width: 15 },
     { header: 'Total Cost ($)', key: 'total_cost', width: 14 },
     { header: 'Product Description', key: 'product_description', width: 30 },
     { header: 'Product Link', key: 'product_link', width: 30 },
@@ -95,10 +98,13 @@ const generateExcel = async (reportData) => {
       tracking_number: parcel.tracking_number,
       customer_name: customerName,
       customer_code: parcel.customers?.customer_code || '-',
+      recipient_name: parcel.recipient_name || '-',
       weight: parcel.weight ? parseFloat(parcel.weight).toFixed(2) : '-',
+      destination_country: parcel.destination_country || 'Таджикистан',
       warehouse: parcel.warehouses ? `${parcel.warehouses.name} (${parcel.warehouses.country})` : '-',
       status: (parcel.status || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
       arrival_date: parcel.arrival_date ? parcel.arrival_date.split('T')[0] : '-',
+      declared_value: parcel.declared_value ? parseFloat(parcel.declared_value).toFixed(2) : '0.00',
       total_cost: parcel.total_cost ? parseFloat(parcel.total_cost).toFixed(2) : '0.00',
       product_description: parcel.product_description || '',
       product_link: parcel.product_link || '',
@@ -135,10 +141,13 @@ const generateCSV = async (reportData) => {
     'Tracking Number',
     'Customer Name',
     'Customer ID',
+    'Recipient Name',
     'Weight (kg)',
+    'Destination Country',
     'Warehouse',
     'Status',
     'Arrival Date',
+    'Declared Value ($)',
     'Total Cost ($)',
     'Product Description',
     'Product Link',
@@ -155,10 +164,13 @@ const generateCSV = async (reportData) => {
       parcel.tracking_number,
       customerName,
       parcel.customers?.customer_code || '-',
+      `"${(parcel.recipient_name || '').replace(/"/g, '""')}"`,
       parcel.weight ? parseFloat(parcel.weight).toFixed(2) : '-',
+      `"${(parcel.destination_country || 'Таджикистан').replace(/"/g, '""')}"`,
       parcel.warehouses ? `${parcel.warehouses.name} (${parcel.warehouses.country})` : '-',
       (parcel.status || '').replace(/_/g, ' '),
       parcel.arrival_date ? parcel.arrival_date.split('T')[0] : '-',
+      parcel.declared_value ? parseFloat(parcel.declared_value).toFixed(2) : '0.00',
       parcel.total_cost ? parseFloat(parcel.total_cost).toFixed(2) : '0.00',
       `"${(parcel.product_description || '').replace(/"/g, '""')}"`,
       `"${(parcel.product_link || '').replace(/"/g, '""')}"`,
@@ -213,8 +225,9 @@ const generatePDF = async (reportData, startDate, endDate) => {
 
     // Table
     const tableTop = 185;
-    const colWidths = [20, 80, 80, 45, 35, 60, 60, 50, 40, 140, 130];
-    const colHeaders = ['#', 'Tracking Number', 'Customer', 'Customer ID', 'Weight', 'Warehouse', 'Status', 'Date', 'Cost ($)', 'Description', 'Link'];
+    // 15 columns widths sum to 740
+    const colWidths = [15, 65, 55, 35, 55, 30, 45, 50, 50, 40, 35, 35, 95, 80, 60];
+    const colHeaders = ['#', 'Tracking Number', 'Customer', 'Customer ID', 'Recipient', 'Weight', 'Dest. Country', 'Warehouse', 'Status', 'Date', 'Value ($)', 'Cost ($)', 'Description', 'Link', 'Notes'];
     const startX = 40;
 
     // Table header
@@ -262,13 +275,17 @@ const generatePDF = async (reportData, startDate, endDate) => {
         parcel.tracking_number,
         customerName,
         parcel.customers?.customer_code || '-',
+        parcel.recipient_name || '-',
         parcel.weight ? `${parseFloat(parcel.weight).toFixed(2)} kg` : '-',
+        parcel.destination_country || 'Таджикистан',
         parcel.warehouses ? parcel.warehouses.name : '-',
         (parcel.status || '').replace(/_/g, ' '),
         parcel.arrival_date ? parcel.arrival_date.split('T')[0] : '-',
+        parcel.declared_value ? `$${parseFloat(parcel.declared_value).toFixed(2)}` : '$0.00',
         parcel.total_cost ? `$${parseFloat(parcel.total_cost).toFixed(2)}` : '$0.00',
         parcel.product_description || '-',
         parcel.product_link || '-',
+        parcel.notes || '-',
       ];
 
       doc.fillColor(DARK);

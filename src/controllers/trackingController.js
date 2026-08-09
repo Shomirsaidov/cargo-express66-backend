@@ -35,7 +35,7 @@ const create = async (req, res, next) => {
       return res.status(422).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link } = req.body;
+    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link, destination_country } = req.body;
 
     // Check for duplicate tracking number for this customer
     const { data: existing } = await supabaseAdmin
@@ -71,7 +71,8 @@ const create = async (req, res, next) => {
           declared_value: declared_value || 0,
           recipient_name: recipient_name || null,
           product_description: product_description || null,
-          product_link: product_link || null
+          product_link: product_link || null,
+          destination_country: destination_country || 'Таджикистан'
         })
         .eq('id', existingParcel.id)
         .select('*, customers(id, customer_code, first_name, last_name, email), warehouses(id, name, country)')
@@ -123,7 +124,8 @@ const create = async (req, res, next) => {
         declared_value: declared_value || 0,
         recipient_name: recipient_name || null,
         product_description: product_description || null,
-        product_link: product_link || null
+        product_link: product_link || null,
+        destination_country: destination_country || 'Таджикистан'
       })
       .select('*, warehouses(name, country)')
       .single();
@@ -158,7 +160,7 @@ const update = async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-     const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link } = req.body;
+     const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link, destination_country } = req.body;
      const updates = {};
      if (tracking_number !== undefined) updates.tracking_number = tracking_number.trim();
      if (store_name !== undefined) updates.store_name = store_name;
@@ -170,6 +172,7 @@ const update = async (req, res, next) => {
      if (recipient_name !== undefined) updates.recipient_name = recipient_name;
      if (product_description !== undefined) updates.product_description = product_description;
      if (product_link !== undefined) updates.product_link = product_link;
+     if (destination_country !== undefined) updates.destination_country = destination_country;
 
      const { data, error } = await supabaseAdmin
        .from('tracking_numbers')
@@ -192,6 +195,7 @@ const update = async (req, res, next) => {
          if (recipient_name !== undefined) parcelUpdates.recipient_name = recipient_name;
          if (product_description !== undefined) parcelUpdates.product_description = product_description;
          if (product_link !== undefined) parcelUpdates.product_link = product_link;
+         if (destination_country !== undefined) parcelUpdates.destination_country = destination_country;
          
          if (Object.keys(parcelUpdates).length > 0) {
            await supabaseAdmin

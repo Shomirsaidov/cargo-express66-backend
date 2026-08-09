@@ -120,6 +120,7 @@ const create = async (req, res, next) => {
       recipient_name,
       product_description,
       product_link,
+      destination_country,
     } = req.body;
 
     // Upload photos if provided
@@ -147,6 +148,7 @@ const create = async (req, res, next) => {
       recipient_name: recipient_name || null,
       product_description: product_description || null,
       product_link: product_link || null,
+      destination_country: destination_country || 'Таджикистан',
     });
 
     res.status(201).json({ data: parcel });
@@ -182,6 +184,7 @@ const update = async (req, res, next) => {
       recipient_name,
       product_description,
       product_link,
+      destination_country,
     } = req.body;
 
     const updates = {};
@@ -198,6 +201,7 @@ const update = async (req, res, next) => {
     if (recipient_name !== undefined) updates.recipient_name = recipient_name;
     if (product_description !== undefined) updates.product_description = product_description;
     if (product_link !== undefined) updates.product_link = product_link;
+    if (destination_country !== undefined) updates.destination_country = destination_country;
 
     // Handle new photos
     let existingPhotos = existing.photos || [];

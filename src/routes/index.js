@@ -15,6 +15,7 @@ const settingsRoutes = require('./settings');
 const cmsRoutes = require('./cms');
 const calculatorRoutes = require('./calculator');
 const adminRoutes = require('./admin');
+const destinationCountriesRoutes = require('./destinationCountries');
 
 router.use('/auth', authRoutes);
 router.use('/customers', customerRoutes);
@@ -30,6 +31,7 @@ router.use('/settings', settingsRoutes);
 router.use('/cms', cmsRoutes);
 router.use('/calculator', calculatorRoutes);
 router.use('/admin', adminRoutes);
+router.use('/destination-countries', destinationCountriesRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

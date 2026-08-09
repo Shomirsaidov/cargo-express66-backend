@@ -109,6 +109,7 @@ const createParcel = async ({
   recipient_name,
   product_description,
   product_link,
+  destination_country,
 }) => {
   // Try to find pre-registered tracking number in all cases
   const { data: trackingRecord } = await supabaseAdmin
@@ -121,6 +122,7 @@ const createParcel = async ({
   let linkedCustomerId = customer_id;
   let finalDescription = product_description;
   let finalLink = product_link;
+  let finalDestination = destination_country;
 
   if (trackingRecord) {
     if (!linkedCustomerId) {
@@ -145,6 +147,9 @@ const createParcel = async ({
     }
     if (!finalLink) {
       finalLink = trackingRecord.product_link;
+    }
+    if (!finalDestination) {
+      finalDestination = trackingRecord.destination_country;
     }
   }
 
@@ -179,6 +184,7 @@ const createParcel = async ({
       recipient_name,
       product_description: finalDescription || null,
       product_link: finalLink || null,
+      destination_country: finalDestination || 'Таджикистан',
     })
     .select('*, customers(id, customer_code, first_name, last_name, email), warehouses(id, name, country)')
     .single();
@@ -262,6 +268,7 @@ const handleScan = async (tracking_number, scanningUser) => {
         recipient_name: linkResult.tracking_record.recipient_name,
         product_description: linkResult.tracking_record.product_description,
         product_link: linkResult.tracking_record.product_link,
+        destination_country: linkResult.tracking_record.destination_country,
       },
       message: 'Tracking number found — customer pre-registered. Enter weight to complete.',
     };

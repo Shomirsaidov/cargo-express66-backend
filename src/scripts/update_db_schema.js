@@ -1,0 +1,15 @@
+console.log('========================================================================');
+console.log('DATABASE SCHEMA MIGRATION REQUIRED FOR PRODUCT DETAILS & RECIPIENT');
+console.log('========================================================================');
+console.log('Please copy and paste the following SQL query into the Supabase SQL Editor');
+console.log('to add the recipient_name, product_description, and product_link columns:');
+console.log('\n');
+console.log('ALTER TABLE public.tracking_numbers ADD COLUMN IF NOT EXISTS recipient_name TEXT;');
+console.log('ALTER TABLE public.tracking_numbers ADD COLUMN IF NOT EXISTS product_description TEXT;');
+console.log('ALTER TABLE public.tracking_numbers ADD COLUMN IF NOT EXISTS product_link TEXT;');
+console.log('\n');
+console.log('ALTER TABLE public.parcels ADD COLUMN IF NOT EXISTS recipient_name TEXT;');
+console.log('ALTER TABLE public.parcels ADD COLUMN IF NOT EXISTS product_description TEXT;');
+console.log('ALTER TABLE public.parcels ADD COLUMN IF NOT EXISTS product_link TEXT;');
+console.log('\n');
+console.log('========================================================================');
