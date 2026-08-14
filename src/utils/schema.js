@@ -13,7 +13,7 @@ const getParcelsColumns = async () => {
     'shipment_date', 'delivery_date', 'notes', 'photos', 'created_at', 'updated_at'
   ];
   
-  const optional = ['recipient_name', 'product_description', 'product_link', 'destination_country'];
+  const optional = ['recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'];
   for (const col of optional) {
     try {
       const { error } = await supabaseAdmin.from('parcels').select(col).limit(1);
@@ -38,7 +38,7 @@ const getTrackingNumbersColumns = async () => {
     'additional_services', 'declared_value'
   ];
   
-  const optional = ['recipient_name', 'product_description', 'product_link', 'destination_country'];
+  const optional = ['recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'];
   for (const col of optional) {
     try {
       const { error } = await supabaseAdmin.from('tracking_numbers').select(col).limit(1);

@@ -3,6 +3,17 @@ const PDFDocument = require('pdfkit');
 const { supabaseAdmin } = require('../config/supabase');
 const { getParcelsColumns } = require('../utils/schema');
 
+const getRecipientDisplayName = (parcel) => {
+  if (parcel.recipient_is_customer) {
+    if (parcel.customers) {
+      const code = parcel.customers.customer_code ? ` (${parcel.customers.customer_code})` : '';
+      return `${parcel.customers.first_name} ${parcel.customers.last_name}${code}`;
+    }
+    return 'Отправитель';
+  }
+  return parcel.recipient_name || '-';
+};
+
 /**
  * Fetch parcel data for the given date range
  */
@@ -100,7 +111,7 @@ const generateExcel = async (reportData) => {
       tracking_number: parcel.tracking_number,
       customer_name: customerName,
       customer_code: parcel.customers?.customer_code || '-',
-      recipient_name: parcel.recipient_name || '-',
+      recipient_name: getRecipientDisplayName(parcel),
       weight: parcel.weight ? parseFloat(parcel.weight).toFixed(2) : '-',
       destination_country: parcel.destination_country || 'Таджикистан',
       warehouse: parcel.warehouses ? `${parcel.warehouses.name} (${parcel.warehouses.country})` : '-',
@@ -166,7 +177,7 @@ const generateCSV = async (reportData) => {
       parcel.tracking_number,
       customerName,
       parcel.customers?.customer_code || '-',
-      `"${(parcel.recipient_name || '').replace(/"/g, '""')}"`,
+      `"${(getRecipientDisplayName(parcel)).replace(/"/g, '""')}"`,
       parcel.weight ? parseFloat(parcel.weight).toFixed(2) : '-',
       `"${(parcel.destination_country || 'Таджикистан').replace(/"/g, '""')}"`,
       parcel.warehouses ? `${parcel.warehouses.name} (${parcel.warehouses.country})` : '-',
@@ -277,7 +288,7 @@ const generatePDF = async (reportData, startDate, endDate) => {
         parcel.tracking_number,
         customerName,
         parcel.customers?.customer_code || '-',
-        parcel.recipient_name || '-',
+        getRecipientDisplayName(parcel),
         parcel.weight ? `${parseFloat(parcel.weight).toFixed(2)} kg` : '-',
         parcel.destination_country || 'Таджикистан',
         parcel.warehouses ? parcel.warehouses.name : '-',

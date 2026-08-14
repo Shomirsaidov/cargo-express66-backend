@@ -122,6 +122,7 @@ const create = async (req, res, next) => {
       product_description,
       product_link,
       destination_country,
+      recipient_is_customer,
     } = req.body;
 
     // Upload photos if provided
@@ -150,6 +151,7 @@ const create = async (req, res, next) => {
       product_description: product_description || null,
       product_link: product_link || null,
       destination_country: destination_country || 'Таджикистан',
+      recipient_is_customer: recipient_is_customer !== undefined ? (recipient_is_customer === 'true' || recipient_is_customer === true) : false,
     });
 
     res.status(201).json({ data: parcel });
@@ -186,6 +188,7 @@ const update = async (req, res, next) => {
       product_description,
       product_link,
       destination_country,
+      recipient_is_customer,
     } = req.body;
 
     const updates = {};
@@ -203,6 +206,7 @@ const update = async (req, res, next) => {
     if (product_description !== undefined) updates.product_description = product_description;
     if (product_link !== undefined) updates.product_link = product_link;
     if (destination_country !== undefined) updates.destination_country = destination_country;
+    if (recipient_is_customer !== undefined) updates.recipient_is_customer = (recipient_is_customer === 'true' || recipient_is_customer === true);
 
     // Handle new photos
     let existingPhotos = existing.photos || [];

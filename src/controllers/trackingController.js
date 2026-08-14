@@ -36,7 +36,7 @@ const create = async (req, res, next) => {
       return res.status(422).json({ error: 'Validation failed', details: errors.array() });
     }
 
-    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link, destination_country } = req.body;
+    const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link, destination_country, recipient_is_customer } = req.body;
 
     // Check for duplicate tracking number for this customer
     const { data: existing } = await supabaseAdmin
@@ -71,7 +71,8 @@ const create = async (req, res, next) => {
         recipient_name: recipient_name || null,
         product_description: product_description || null,
         product_link: product_link || null,
-        destination_country: destination_country || 'Таджикистан'
+        destination_country: destination_country || 'Таджикистан',
+        recipient_is_customer: (recipient_is_customer === 'true' || recipient_is_customer === true)
       });
 
       const { data: updatedParcel, error: updateError } = await supabaseAdmin
@@ -126,7 +127,8 @@ const create = async (req, res, next) => {
       recipient_name: recipient_name || null,
       product_description: product_description || null,
       product_link: product_link || null,
-      destination_country: destination_country || 'Таджикистан'
+      destination_country: destination_country || 'Таджикистан',
+      recipient_is_customer: (recipient_is_customer === 'true' || recipient_is_customer === true)
     });
 
     const { data, error } = await supabaseAdmin
@@ -165,7 +167,7 @@ const update = async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-     const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link, destination_country } = req.body;
+     const { tracking_number, store_name, country_of_origin, warehouse_id, notes, additional_services, declared_value, recipient_name, product_description, product_link, destination_country, recipient_is_customer } = req.body;
      const updates = {};
      if (tracking_number !== undefined) updates.tracking_number = tracking_number.trim();
      if (store_name !== undefined) updates.store_name = store_name;
@@ -178,6 +180,7 @@ const update = async (req, res, next) => {
      if (product_description !== undefined) updates.product_description = product_description;
      if (product_link !== undefined) updates.product_link = product_link;
      if (destination_country !== undefined) updates.destination_country = destination_country;
+     if (recipient_is_customer !== undefined) updates.recipient_is_customer = (recipient_is_customer === 'true' || recipient_is_customer === true);
 
      const filteredUpdates = await filterPayload('tracking_numbers', updates);
 
@@ -203,6 +206,7 @@ const update = async (req, res, next) => {
           if (product_description !== undefined) parcelUpdates.product_description = product_description;
           if (product_link !== undefined) parcelUpdates.product_link = product_link;
           if (destination_country !== undefined) parcelUpdates.destination_country = destination_country;
+          if (recipient_is_customer !== undefined) parcelUpdates.recipient_is_customer = (recipient_is_customer === 'true' || recipient_is_customer === true);
           
           if (Object.keys(parcelUpdates).length > 0) {
             const filteredParcelUpdates = await filterPayload('parcels', parcelUpdates);
