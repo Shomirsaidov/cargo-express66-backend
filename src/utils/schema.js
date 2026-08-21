@@ -4,22 +4,76 @@ let parcelsColumnsCache = null;
 let trackingNumbersColumnsCache = null;
 
 const getParcelsColumns = async () => {
-  return [
+  if (parcelsColumnsCache) return parcelsColumnsCache;
+
+  const baseCols = [
     'id', 'tracking_number', 'customer_id', 'warehouse_id', 'airway_bill_id', 
     'weight', 'dimensions', 'declared_value', 'insurance_cost', 
     'additional_services_cost', 'total_cost', 'status', 'arrival_date', 
-    'shipment_date', 'delivery_date', 'notes', 'photos', 'created_at', 'updated_at',
-    'recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'
+    'shipment_date', 'delivery_date', 'notes', 'photos', 'created_at', 'updated_at'
   ];
+
+  const optional = ['recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'];
+  let allChecked = true;
+
+  for (const col of optional) {
+    try {
+      const { error } = await supabaseAdmin.from('parcels').select(col).limit(1);
+      if (!error) {
+        baseCols.push(col);
+      } else if (error.code === '42703') {
+        // Column definitely does not exist in DB
+      } else {
+        // Transient error (connection, rate limit, etc.) - don't cache yet, but include as fallback
+        allChecked = false;
+        baseCols.push(col);
+      }
+    } catch (e) {
+      allChecked = false;
+      baseCols.push(col);
+    }
+  }
+
+  if (allChecked) {
+    parcelsColumnsCache = baseCols;
+  }
+  return baseCols;
 };
 
 const getTrackingNumbersColumns = async () => {
-  return [
+  if (trackingNumbersColumnsCache) return trackingNumbersColumnsCache;
+
+  const baseCols = [
     'id', 'customer_id', 'tracking_number', 'store_name', 'country_of_origin', 
     'warehouse_id', 'notes', 'is_linked', 'created_at', 'updated_at', 
-    'additional_services', 'declared_value',
-    'recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'
+    'additional_services', 'declared_value'
   ];
+
+  const optional = ['recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'];
+  let allChecked = true;
+
+  for (const col of optional) {
+    try {
+      const { error } = await supabaseAdmin.from('tracking_numbers').select(col).limit(1);
+      if (!error) {
+        baseCols.push(col);
+      } else if (error.code === '42703') {
+        // Column definitely does not exist in DB
+      } else {
+        // Transient error (connection, rate limit, etc.) - don't cache yet, but include as fallback
+        allChecked = false;
+        baseCols.push(col);
+      }
+    } catch (e) {
+      allChecked = false;
+      baseCols.push(col);
+    }
+  }
+
+  if (allChecked) {
+    trackingNumbersColumnsCache = baseCols;
+  }
+  return baseCols;
 };
 
 /**
