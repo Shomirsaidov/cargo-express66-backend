@@ -6,7 +6,22 @@ const { supabaseAdmin, supabase } = require('../config/supabase');
 require('dotenv').config();
 
 /**
- * Generate a unique customer code: CX66-XXXXXX
+ * Helper to convert an integer number into a base-26 uppercase alphabetical string.
+ * e.g., 0 -> AAAAAA, 1 -> AAAAAB, 26 -> AAAABA
+ */
+function numberToLetters(num, length = 6) {
+  let result = '';
+  let temp = num;
+  for (let i = 0; i < length; i++) {
+    const code = temp % 26;
+    result = String.fromCharCode(65 + code) + result; // 65 is 'A'
+    temp = Math.floor(temp / 26);
+  }
+  return result;
+}
+
+/**
+ * Generate a unique customer code: CX-XXXXXX (alphabetic)
  */
 async function generateCustomerCode() {
   const { count, error } = await supabaseAdmin
@@ -15,7 +30,8 @@ async function generateCustomerCode() {
 
   if (error) throw error;
   const next = (count || 0) + 1;
-  return `CX66-${String(next).padStart(6, '0')}`;
+  const letterCode = numberToLetters(next - 1, 6);
+  return `CX-${letterCode}`;
 }
 
 /**

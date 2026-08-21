@@ -297,6 +297,26 @@ const update = async (req, res, next) => {
 
     if (error) throw error;
 
+    // Sync updates back to tracking_numbers table if it exists
+    if (data && data.tracking_number) {
+      const trackingUpdates = {};
+      if (recipient_name !== undefined) trackingUpdates.recipient_name = recipient_name;
+      if (product_description !== undefined) trackingUpdates.product_description = product_description;
+      if (product_link !== undefined) trackingUpdates.product_link = product_link;
+      if (destination_country !== undefined) trackingUpdates.destination_country = destination_country;
+      if (recipient_is_customer !== undefined) trackingUpdates.recipient_is_customer = (recipient_is_customer === 'true' || recipient_is_customer === true);
+
+      if (Object.keys(trackingUpdates).length > 0) {
+        const filteredTrackingUpdates = await filterPayload('tracking_numbers', trackingUpdates);
+        if (Object.keys(filteredTrackingUpdates).length > 0) {
+          await supabaseAdmin
+            .from('tracking_numbers')
+            .update(filteredTrackingUpdates)
+            .eq('tracking_number', data.tracking_number);
+        }
+      }
+    }
+
     if (autoLinked) {
       // Clean up previous unknown recipient history entries
       await supabaseAdmin

@@ -4,54 +4,22 @@ let parcelsColumnsCache = null;
 let trackingNumbersColumnsCache = null;
 
 const getParcelsColumns = async () => {
-  if (parcelsColumnsCache) return parcelsColumnsCache;
-  
-  const baseCols = [
+  return [
     'id', 'tracking_number', 'customer_id', 'warehouse_id', 'airway_bill_id', 
     'weight', 'dimensions', 'declared_value', 'insurance_cost', 
     'additional_services_cost', 'total_cost', 'status', 'arrival_date', 
-    'shipment_date', 'delivery_date', 'notes', 'photos', 'created_at', 'updated_at'
+    'shipment_date', 'delivery_date', 'notes', 'photos', 'created_at', 'updated_at',
+    'recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'
   ];
-  
-  const optional = ['recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'];
-  for (const col of optional) {
-    try {
-      const { error } = await supabaseAdmin.from('parcels').select(col).limit(1);
-      if (!error) {
-        baseCols.push(col);
-      }
-    } catch (e) {
-      // Ignore query errors
-    }
-  }
-  
-  parcelsColumnsCache = baseCols;
-  return baseCols;
 };
 
 const getTrackingNumbersColumns = async () => {
-  if (trackingNumbersColumnsCache) return trackingNumbersColumnsCache;
-  
-  const baseCols = [
+  return [
     'id', 'customer_id', 'tracking_number', 'store_name', 'country_of_origin', 
     'warehouse_id', 'notes', 'is_linked', 'created_at', 'updated_at', 
-    'additional_services', 'declared_value'
+    'additional_services', 'declared_value',
+    'recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'
   ];
-  
-  const optional = ['recipient_name', 'product_description', 'product_link', 'destination_country', 'recipient_is_customer'];
-  for (const col of optional) {
-    try {
-      const { error } = await supabaseAdmin.from('tracking_numbers').select(col).limit(1);
-      if (!error) {
-        baseCols.push(col);
-      }
-    } catch (e) {
-      // Ignore query errors
-    }
-  }
-  
-  trackingNumbersColumnsCache = baseCols;
-  return baseCols;
 };
 
 /**
