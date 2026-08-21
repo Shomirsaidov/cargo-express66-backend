@@ -79,7 +79,7 @@ const generateExcel = async (reportData) => {
     { header: 'Destination Country', key: 'destination_country', width: 20 },
     { header: 'Warehouse', key: 'warehouse', width: 20 },
     { header: 'Status', key: 'status', width: 22 },
-    { header: 'Arrival Date', key: 'arrival_date', width: 15 },
+    { header: 'Estimated Arrival Date', key: 'arrival_date', width: 25 },
     { header: 'Declared Value ($)', key: 'declared_value', width: 15 },
     { header: 'Total Cost ($)', key: 'total_cost', width: 14 },
     { header: 'Product Description', key: 'product_description', width: 30 },
@@ -159,7 +159,7 @@ const generateCSV = async (reportData) => {
     'Destination Country',
     'Warehouse',
     'Status',
-    'Arrival Date',
+    'Estimated Arrival Date',
     'Declared Value ($)',
     'Total Cost ($)',
     'Product Description',
@@ -239,8 +239,8 @@ const generatePDF = async (reportData, startDate, endDate) => {
     // Table
     const tableTop = 185;
     // 15 columns widths sum to 740
-    const colWidths = [15, 65, 55, 35, 55, 30, 45, 50, 50, 40, 35, 35, 95, 80, 60];
-    const colHeaders = ['#', 'Tracking Number', 'Customer', 'Customer ID', 'Recipient', 'Weight', 'Dest. Country', 'Warehouse', 'Status', 'Date', 'Value ($)', 'Cost ($)', 'Description', 'Link', 'Notes'];
+    const colWidths = [15, 65, 55, 35, 55, 30, 45, 50, 50, 50, 35, 35, 95, 80, 50];
+    const colHeaders = ['#', 'Tracking Number', 'Customer', 'Customer ID', 'Recipient', 'Weight', 'Dest. Country', 'Warehouse', 'Status', 'Est. Arrival', 'Value ($)', 'Cost ($)', 'Description', 'Link', 'Notes'];
     const startX = 40;
 
     // Table header
