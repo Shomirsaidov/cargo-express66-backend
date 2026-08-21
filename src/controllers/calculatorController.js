@@ -26,12 +26,21 @@ const calculate = async (req, res, next) => {
     if (tariffData) {
       tariff = tariffData;
     } else {
-      tariff = { id: 'd6f43e01-6b24-4893-bc24-be2ef2f94567', price_per_kg: 16.00, minimum_charge: 16.00, delivery_time: '7-10 days' };
+      // Fallback tariff
+      tariff = { 
+        id: 'd6f43e01-6b24-4893-bc24-be2ef2f94567', 
+        price_per_kg: 16.00, 
+        minimum_charge: 10.00, 
+        delivery_time: '7-10 days',
+        tech_rates: {}
+      };
     }
 
-    // Base delivery cost calculation
-    let baseCost = 0;
-    const techRates = {
+    const baseRate = parseFloat(tariff.price_per_kg || 16.00);
+    const minimumCharge = parseFloat(tariff.minimum_charge || 0.00);
+
+    // Merge default tech rates with database-configured tech rates
+    let techRates = {
       macbook: 100,
       laptop: 100,
       iphone: 100,
@@ -43,17 +52,26 @@ const calculate = async (req, res, next) => {
       ebook: 15
     };
 
+    if (tariff.tech_rates && typeof tariff.tech_rates === 'object') {
+      techRates = { ...techRates, ...tariff.tech_rates };
+    }
+
+    // Base delivery cost calculation
+    let baseCost = 0;
     if (item_type && techRates[item_type]) {
       baseCost = techRates[item_type];
     } else {
       const calculatedWeight = weightKg < 1.0 ? 1.0 : weightKg;
-      let rate = 16;
+      let rate = baseRate;
       if (calculatedWeight >= 1000) {
-        rate = 11;
+        rate = Math.max(1, baseRate - 5); // Example: $16 -> $11 ($5 discount)
       } else if (calculatedWeight >= 100) {
-        rate = 15;
+        rate = Math.max(1, baseRate - 1); // Example: $16 -> $15 ($1 discount)
       }
       baseCost = calculatedWeight * rate;
+      if (baseCost < minimumCharge) {
+        baseCost = minimumCharge;
+      }
     }
 
     // Calculate additional services cost

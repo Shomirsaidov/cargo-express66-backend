@@ -30,6 +30,9 @@ const computeCosts = async ({ warehouse_id, weight, declared_value, service_ids 
   let insuranceCost = 0;
   let servicesCost = 0;
 
+  let baseRate = 16.00;
+  let minimumCharge = 10.00;
+
   // Fetch warehouse to get country
   const { data: warehouse } = await supabaseAdmin
     .from('warehouses')
@@ -37,16 +40,32 @@ const computeCosts = async ({ warehouse_id, weight, declared_value, service_ids 
     .eq('id', warehouse_id)
     .single();
 
+  if (warehouse && warehouse.country) {
+    const { data: tariff } = await supabaseAdmin
+      .from('tariffs')
+      .select('price_per_kg, minimum_charge')
+      .eq('is_active', true)
+      .ilike('country', warehouse.country)
+      .single();
+    if (tariff) {
+      baseRate = parseFloat(tariff.price_per_kg || 16.00);
+      minimumCharge = parseFloat(tariff.minimum_charge || 0.00);
+    }
+  }
+
   if (weight) {
     const weightKg = parseFloat(weight);
     const calculatedWeight = weightKg < 1.0 ? 1.0 : weightKg;
-    let rate = 16;
+    let rate = baseRate;
     if (calculatedWeight >= 1000) {
-      rate = 11;
+      rate = Math.max(1, baseRate - 5); // Example: $16 -> $11 ($5 discount)
     } else if (calculatedWeight >= 100) {
-      rate = 15;
+      rate = Math.max(1, baseRate - 1); // Example: $16 -> $15 ($1 discount)
     }
     deliveryCost = calculatedWeight * rate;
+    if (deliveryCost < minimumCharge) {
+      deliveryCost = minimumCharge;
+    }
   }
 
   // Calculate services

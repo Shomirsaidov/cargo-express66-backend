@@ -10,7 +10,7 @@ router.get('/public', async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('tariffs')
-      .select('id, country, price_per_kg, minimum_charge, delivery_time')
+      .select('id, country, price_per_kg, minimum_charge, delivery_time, tech_rates')
       .eq('is_active', true)
       .order('country');
 
@@ -64,10 +64,10 @@ router.post(
   ],
   async (req, res, next) => {
     try {
-      const { country, price_per_kg, minimum_charge, delivery_time, is_active = true } = req.body;
+      const { country, price_per_kg, minimum_charge, delivery_time, is_active = true, tech_rates = {} } = req.body;
       const { data, error } = await supabaseAdmin
         .from('tariffs')
-        .insert({ country, price_per_kg, minimum_charge, delivery_time, is_active })
+        .insert({ country, price_per_kg, minimum_charge, delivery_time, is_active, tech_rates })
         .select()
         .single();
 
@@ -82,13 +82,14 @@ router.post(
 // PUT /api/tariffs/:id
 router.put('/:id', authenticate, requireRole('admin'), async (req, res, next) => {
   try {
-    const { country, price_per_kg, minimum_charge, delivery_time, is_active } = req.body;
+    const { country, price_per_kg, minimum_charge, delivery_time, is_active, tech_rates } = req.body;
     const updates = {};
     if (country !== undefined) updates.country = country;
     if (price_per_kg !== undefined) updates.price_per_kg = price_per_kg;
     if (minimum_charge !== undefined) updates.minimum_charge = minimum_charge;
     if (delivery_time !== undefined) updates.delivery_time = delivery_time;
     if (is_active !== undefined) updates.is_active = is_active;
+    if (tech_rates !== undefined) updates.tech_rates = tech_rates;
 
     const { data, error } = await supabaseAdmin
       .from('tariffs')
