@@ -6,32 +6,27 @@ const { supabaseAdmin, supabase } = require('../config/supabase');
 require('dotenv').config();
 
 /**
- * Helper to convert an integer number into a base-26 uppercase alphabetical string.
- * e.g., 0 -> AAAAAA, 1 -> AAAAAB, 26 -> AAAABA
+ * Generate a unique customer code in the required format: CX66-000001
  */
-function numberToLetters(num, length = 6) {
-  let result = '';
-  let temp = num;
-  for (let i = 0; i < length; i++) {
-    const code = temp % 26;
-    result = String.fromCharCode(65 + code) + result; // 65 is 'A'
-    temp = Math.floor(temp / 26);
-  }
-  return result;
+function buildCustomerCodeFromNumber(nextNumber) {
+  return `CX66-${String(nextNumber).padStart(6, '0')}`;
 }
 
-/**
- * Generate a unique customer code: CX-XXXXXX (alphabetic)
- */
 async function generateCustomerCode() {
-  const { count, error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('customers')
-    .select('id', { count: 'exact', head: true });
+    .select('customer_code');
 
   if (error) throw error;
-  const next = (count || 0) + 1;
-  const letterCode = numberToLetters(next - 1, 6);
-  return `CX-${letterCode}`;
+
+  const existingCodes = Array.isArray(data) ? data.map((row) => row.customer_code).filter(Boolean) : [];
+  const maxNumber = existingCodes.reduce((max, code) => {
+    const match = /^CX66-(\d{6})$/.exec(code);
+    if (!match) return max;
+    return Math.max(max, Number(match[1]));
+  }, 0);
+
+  return buildCustomerCodeFromNumber(maxNumber + 1);
 }
 
 /**
@@ -65,29 +60,33 @@ const register = async (req, res, next) => {
 
     const { first_name, last_name, middle_name, phone, email, password, delivery_address } = req.body;
 
+    const normalizedEmail = email.toLowerCase();
+
     // Check if email already exists in customers
-    const { data: existing } = await supabaseAdmin
+    const { data: existingCustomer, error: existingCustomerError } = await supabaseAdmin
       .from('customers')
       .select('id')
-      .eq('email', email.toLowerCase())
-      .single();
+      .eq('email', normalizedEmail)
+      .maybeSingle();
 
-    if (existing) {
+    if (existingCustomerError) {
+      throw existingCustomerError;
+    }
+
+    if (existingCustomer) {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
-    // Hash password
-    const passwordHash = await bcrypt.hash(password, 12);
-
     // Create auth user in Supabase Auth using admin API
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       password,
       email_confirm: true,
     });
 
     if (authError) {
-      if (authError.message.includes('already registered')) {
+      const message = authError.message || '';
+      if (/(already|exists|duplicate)/i.test(message)) {
         return res.status(409).json({ error: 'Email already registered' });
       }
       throw authError;
@@ -95,30 +94,41 @@ const register = async (req, res, next) => {
 
     const userId = authData.user.id;
 
-    // Generate customer code
-    const customerCode = await generateCustomerCode();
+    let customer;
+    let customerError;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const customerCode = await generateCustomerCode();
+      const result = await supabaseAdmin
+        .from('customers')
+        .insert({
+          user_id: userId,
+          customer_code: customerCode,
+          first_name,
+          last_name,
+          middle_name: middle_name || null,
+          phone,
+          email: normalizedEmail,
+          delivery_address,
+          role: 'customer',
+          is_active: true,
+        })
+        .select()
+        .single();
 
-    // Create customer record
-    const { data: customer, error: customerError } = await supabaseAdmin
-      .from('customers')
-      .insert({
-        user_id: userId,
-        customer_code: customerCode,
-        first_name,
-        last_name,
-        middle_name: middle_name || null,
-        phone,
-        email: email.toLowerCase(),
-        delivery_address,
-        role: 'customer',
-        is_active: true,
-      })
-      .select()
-      .single();
+      customer = result.data;
+      customerError = result.error;
+
+      if (!customerError) break;
+
+      if (customerError.code === '23505' && /customer_code|email|user_id/i.test(customerError.message || '')) {
+        continue;
+      }
+
+      break;
+    }
 
     if (customerError) {
-      // Rollback: delete auth user
-      await supabaseAdmin.auth.admin.deleteUser(userId);
+      await supabaseAdmin.auth.admin.deleteUser(userId).catch(() => {});
       throw customerError;
     }
 
