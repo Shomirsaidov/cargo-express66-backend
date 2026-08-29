@@ -1,5 +1,41 @@
 -- Run this SQL in your Supabase SQL Editor to migrate the database:
 
+-- Convert all customer_code values from numeric format like CX66-000057 to alphabetical format like CX-AAAAAA
+CREATE OR REPLACE FUNCTION public.number_to_letters(num integer, length integer DEFAULT 6)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  result text := '';
+  temp integer := num;
+  remainder integer;
+BEGIN
+  IF length <= 0 THEN
+    RETURN '';
+  END IF;
+
+  FOR i IN 1..length LOOP
+    remainder := temp % 26;
+    result := chr(65 + remainder) || result;
+    temp := temp / 26;
+  END LOOP;
+
+  RETURN result;
+END;
+$$;
+
+WITH ordered_customers AS (
+  SELECT
+    id,
+    ROW_NUMBER() OVER (ORDER BY created_at, id) - 1 AS row_index
+  FROM public.customers
+)
+UPDATE public.customers c
+SET customer_code = 'CX-' || public.number_to_letters(oc.row_index, 6)
+FROM ordered_customers oc
+WHERE c.id = oc.id;
+
 -- Add columns to tracking_numbers table
 ALTER TABLE public.tracking_numbers ADD COLUMN IF NOT EXISTS additional_services UUID[] DEFAULT '{}';
 ALTER TABLE public.tracking_numbers ADD COLUMN IF NOT EXISTS declared_value NUMERIC DEFAULT 0;

@@ -6,10 +6,19 @@ const { supabaseAdmin, supabase } = require('../config/supabase');
 require('dotenv').config();
 
 /**
- * Generate a unique customer code in the required format: CX66-000001
+ * Generate a unique customer code in the required format: CX-AAAAAA
  */
-function buildCustomerCodeFromNumber(nextNumber) {
-  return `CX66-${String(nextNumber).padStart(6, '0')}`;
+function numberToLetters(num, length = 6) {
+  let result = '';
+  let temp = num;
+
+  for (let i = 0; i < length; i += 1) {
+    const code = temp % 26;
+    result = String.fromCharCode(65 + code) + result;
+    temp = Math.floor(temp / 26);
+  }
+
+  return result;
 }
 
 async function generateCustomerCode() {
@@ -20,13 +29,19 @@ async function generateCustomerCode() {
   if (error) throw error;
 
   const existingCodes = Array.isArray(data) ? data.map((row) => row.customer_code).filter(Boolean) : [];
-  const maxNumber = existingCodes.reduce((max, code) => {
-    const match = /^CX66-(\d{6})$/.exec(code);
+  const maxIndex = existingCodes.reduce((max, code) => {
+    const match = /^CX-([A-Z]{6})$/.exec(code);
     if (!match) return max;
-    return Math.max(max, Number(match[1]));
+
+    const letters = match[1];
+    let value = 0;
+    for (let i = 0; i < letters.length; i += 1) {
+      value = value * 26 + (letters.charCodeAt(i) - 65);
+    }
+    return Math.max(max, value + 1);
   }, 0);
 
-  return buildCustomerCodeFromNumber(maxNumber + 1);
+  return `CX-${numberToLetters(maxIndex, 6)}`;
 }
 
 /**
