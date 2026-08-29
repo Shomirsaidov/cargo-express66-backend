@@ -69,6 +69,15 @@ app.get('/', (req, res) => {
   });
 });
 
+
+app.get('/health', (req,res) => {
+  res.json({
+    status: "200",
+    system: "working",
+    iman: "stable"
+  })
+})
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
