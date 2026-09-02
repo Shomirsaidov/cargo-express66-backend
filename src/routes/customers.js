@@ -8,8 +8,8 @@ const { requireRole } = require('../middleware/roles');
 // GET /api/customers/me/profile — current customer profile
 router.get('/me/profile', authenticate, customerController.getMyProfile);
 
-// GET /api/customers — admin only
-router.get('/', authenticate, requireRole('admin'), customerController.list);
+// GET /api/customers — admin and warehouse employee search/list
+router.get('/', authenticate, requireRole('admin', 'warehouse_employee'), customerController.list);
 
 // GET /api/customers/:id — admin only
 router.get('/:id', authenticate, requireRole('admin'), customerController.getById);
