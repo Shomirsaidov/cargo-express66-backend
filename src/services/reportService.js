@@ -20,7 +20,7 @@ const getRecipientDisplayName = (parcel) => {
 const buildWeeklyReportData = async (startDate, endDate) => {
   const allowedCols = await getParcelsColumns();
   const selectString = `${allowedCols.join(', ')},
-     customers(id, customer_code, first_name, last_name, email),
+     customers(id, customer_code, first_name, last_name, email, delivery_address),
      warehouses(id, name, country)`;
 
   const { data, error } = await supabaseAdmin
@@ -52,35 +52,36 @@ const generateExcel = async (reportData) => {
 
   const sheet = workbook.addWorksheet('Weekly Report');
 
-  // Title row - extended to O1 (15 columns)
-  sheet.mergeCells('A1:O1');
+  // Title row - extended to P1 (16 columns)
+  sheet.mergeCells('A1:P1');
   const titleCell = sheet.getCell('A1');
   titleCell.value = `Cargo Express 66 — Weekly Report (${reportData.startDate} to ${reportData.endDate})`;
   titleCell.font = { bold: true, size: 14, color: { argb: 'FF6997CF' } };
   titleCell.alignment = { horizontal: 'center' };
   sheet.getRow(1).height = 30;
 
-  // Summary row - extended to O2 (15 columns)
-  sheet.mergeCells('A2:O2');
+  // Summary row - extended to P2 (16 columns)
+  sheet.mergeCells('A2:P2');
   const summaryCell = sheet.getCell('A2');
   summaryCell.value = `Total Parcels: ${reportData.totalParcels}  |  Total Weight: ${reportData.totalWeight.toFixed(2)} kg  |  Total Revenue: $${reportData.totalRevenue.toFixed(2)}`;
   summaryCell.font = { bold: true, size: 11 };
   summaryCell.alignment = { horizontal: 'center' };
   sheet.getRow(2).height = 20;
 
-  // Header row - 15 columns
+  // Header row - 16 columns
   const headers = [
     { header: '#', key: 'num', width: 5 },
     { header: 'Tracking Number', key: 'tracking_number', width: 25 },
     { header: 'Customer Name', key: 'customer_name', width: 25 },
     { header: 'Customer ID', key: 'customer_code', width: 15 },
+    { header: 'Delivery Address', key: 'delivery_address', width: 35 },
     { header: 'Recipient Name', key: 'recipient_name', width: 25 },
     { header: 'Weight (kg)', key: 'weight', width: 12 },
     { header: 'Destination Country', key: 'destination_country', width: 20 },
     { header: 'Warehouse', key: 'warehouse', width: 20 },
     { header: 'Status', key: 'status', width: 22 },
     { header: 'Estimated Arrival Date', key: 'arrival_date', width: 25 },
-    { header: 'Declared Value ($)', key: 'declared_value', width: 15 },
+    { header: 'Product Value ($)', key: 'declared_value', width: 15 },
     { header: 'Total Cost ($)', key: 'total_cost', width: 14 },
     { header: 'Product Description', key: 'product_description', width: 30 },
     { header: 'Product Link', key: 'product_link', width: 30 },
@@ -111,6 +112,7 @@ const generateExcel = async (reportData) => {
       tracking_number: parcel.tracking_number,
       customer_name: customerName,
       customer_code: parcel.customers?.customer_code || '-',
+      delivery_address: parcel.customers?.delivery_address || '-',
       recipient_name: getRecipientDisplayName(parcel),
       weight: parcel.weight ? parseFloat(parcel.weight).toFixed(2) : '-',
       destination_country: parcel.destination_country || 'Таджикистан',
@@ -154,13 +156,14 @@ const generateCSV = async (reportData) => {
     'Tracking Number',
     'Customer Name',
     'Customer ID',
+    'Delivery Address',
     'Recipient Name',
     'Weight (kg)',
     'Destination Country',
     'Warehouse',
     'Status',
     'Estimated Arrival Date',
-    'Declared Value ($)',
+    'Product Value ($)',
     'Total Cost ($)',
     'Product Description',
     'Product Link',
@@ -177,6 +180,7 @@ const generateCSV = async (reportData) => {
       parcel.tracking_number,
       customerName,
       parcel.customers?.customer_code || '-',
+      `"${(parcel.customers?.delivery_address || '').replace(/"/g, '""')}"`,
       `"${(getRecipientDisplayName(parcel)).replace(/"/g, '""')}"`,
       parcel.weight ? parseFloat(parcel.weight).toFixed(2) : '-',
       `"${(parcel.destination_country || 'Таджикистан').replace(/"/g, '""')}"`,
@@ -238,13 +242,13 @@ const generatePDF = async (reportData, startDate, endDate) => {
 
     // Table
     const tableTop = 185;
-    // 15 columns widths sum to 740
-    const colWidths = [15, 65, 55, 35, 55, 30, 45, 50, 50, 50, 35, 35, 95, 80, 50];
-    const colHeaders = ['#', 'Tracking Number', 'Customer', 'Customer ID', 'Recipient', 'Weight', 'Dest. Country', 'Warehouse', 'Status', 'Est. Arrival', 'Value ($)', 'Cost ($)', 'Description', 'Link', 'Notes'];
-    const startX = 40;
+    // 16 columns widths sum to 780
+    const colWidths = [15, 65, 55, 35, 75, 55, 30, 45, 50, 50, 50, 35, 35, 95, 80, 50];
+    const colHeaders = ['#', 'Tracking Number', 'Customer', 'Customer ID', 'Delivery Address', 'Recipient', 'Weight', 'Dest. Country', 'Warehouse', 'Status', 'Est. Arrival', 'Product Value', 'Cost ($)', 'Description', 'Link', 'Notes'];
+    const startX = 20;
 
     // Table header
-    doc.rect(startX, tableTop - 5, 740, 20).fill(BLUE);
+    doc.rect(startX, tableTop - 5, 780, 20).fill(BLUE);
     doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
 
     let xPos = startX + 2;
@@ -263,7 +267,7 @@ const generatePDF = async (reportData, startDate, endDate) => {
         doc.addPage({ layout: 'landscape' });
         yPos = 40;
         // Re-draw header on new page
-        doc.rect(startX, yPos - 5, 740, 20).fill(BLUE);
+        doc.rect(startX, yPos - 5, 780, 20).fill(BLUE);
         doc.fillColor('#FFFFFF').fontSize(8).font('Helvetica-Bold');
         xPos = startX + 2;
         colHeaders.forEach((header, i) => {
@@ -276,7 +280,7 @@ const generatePDF = async (reportData, startDate, endDate) => {
 
       // Alternate row bg
       if (index % 2 === 0) {
-        doc.rect(startX, yPos - 3, 740, rowHeight).fill('#F5F8FF');
+        doc.rect(startX, yPos - 3, 780, rowHeight).fill('#F5F8FF');
       }
 
       const customerName = parcel.customers
@@ -288,6 +292,7 @@ const generatePDF = async (reportData, startDate, endDate) => {
         parcel.tracking_number,
         customerName,
         parcel.customers?.customer_code || '-',
+        parcel.customers?.delivery_address || '-',
         getRecipientDisplayName(parcel),
         parcel.weight ? `${parseFloat(parcel.weight).toFixed(2)} kg` : '-',
         parcel.destination_country || 'Таджикистан',
@@ -309,7 +314,7 @@ const generatePDF = async (reportData, startDate, endDate) => {
       });
 
       // Row border
-      doc.moveTo(startX, yPos + rowHeight - 3).lineTo(startX + 740, yPos + rowHeight - 3)
+      doc.moveTo(startX, yPos + rowHeight - 3).lineTo(startX + 780, yPos + rowHeight - 3)
         .strokeColor('#DDDDDD').stroke();
 
       yPos += rowHeight;
