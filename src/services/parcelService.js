@@ -3,6 +3,36 @@ const { uploadToCloudinary } = require('../utils/cloudinaryUtils');
 const notificationService = require('./notificationService');
 const { filterPayload } = require('../utils/schema');
 
+const normalizeCountry = (country) => String(country || '').trim().toLowerCase();
+
+const getActiveTariffByCountry = async (country) => {
+  const { data: tariffs, error } = await supabaseAdmin
+    .from('tariffs')
+    .select('id, country, price_per_kg, minimum_charge, delivery_time, tech_rates')
+    .eq('is_active', true);
+
+  if (error) throw error;
+
+  const tariff = (tariffs || []).find(
+    (item) => normalizeCountry(item.country) === normalizeCountry(country)
+  );
+
+  if (!tariff) {
+    const errorWithStatus = new Error(`No active tariff configured for warehouse country: ${country}`);
+    errorWithStatus.statusCode = 422;
+    throw errorWithStatus;
+  }
+
+  const pricePerKg = Number(tariff.price_per_kg);
+  if (!Number.isFinite(pricePerKg) || pricePerKg < 0) {
+    const errorWithStatus = new Error(`Invalid price per kg configured for ${country}`);
+    errorWithStatus.statusCode = 422;
+    throw errorWithStatus;
+  }
+
+  return tariff;
+};
+
 /**
  * Find a customer by tracking number (from tracking_numbers table)
  */
@@ -30,28 +60,22 @@ const computeCosts = async ({ warehouse_id, weight, declared_value, service_ids 
   let insuranceCost = 0;
   let servicesCost = 0;
 
-  let baseRate = 16.00;
-  let minimumCharge = 10.00;
-
   // Fetch warehouse to get country
-  const { data: warehouse } = await supabaseAdmin
+  const { data: warehouse, error: warehouseError } = await supabaseAdmin
     .from('warehouses')
     .select('country')
     .eq('id', warehouse_id)
     .single();
 
-  if (warehouse && warehouse.country) {
-    const { data: tariff } = await supabaseAdmin
-      .from('tariffs')
-      .select('price_per_kg, minimum_charge')
-      .eq('is_active', true)
-      .ilike('country', warehouse.country)
-      .single();
-    if (tariff) {
-      baseRate = parseFloat(tariff.price_per_kg || 16.00);
-      minimumCharge = parseFloat(tariff.minimum_charge || 0.00);
-    }
+  if (warehouseError || !warehouse?.country) {
+    const errorWithStatus = new Error('Warehouse country is required to calculate parcel cost');
+    errorWithStatus.statusCode = 422;
+    throw errorWithStatus;
   }
+
+  const tariff = await getActiveTariffByCountry(warehouse.country);
+  const baseRate = Number(tariff.price_per_kg);
+  const minimumCharge = Number(tariff.minimum_charge || 0);
 
   if (weight) {
     const weightKg = parseFloat(weight);
@@ -372,4 +396,11 @@ const updateParcelServicesAndCosts = async (parcelId, serviceIds, declaredValue,
   }
 };
 
-module.exports = { linkTrackingNumber, computeCosts, createParcel, handleScan, updateParcelServicesAndCosts };
+module.exports = {
+  linkTrackingNumber,
+  computeCosts,
+  createParcel,
+  handleScan,
+  updateParcelServicesAndCosts,
+  getActiveTariffByCountry,
+};

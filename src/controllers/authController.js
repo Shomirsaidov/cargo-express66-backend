@@ -15,15 +15,40 @@ function createPasswordResetOtp() {
   return crypto.randomInt(100000, 1000000).toString();
 }
 
-async function sendPasswordResetEmail(email, otp) {
+function maskEmail(email) {
+  const [local, domain] = email.split('@');
+  if (!domain) return 'invalid-email';
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
+async function sendPasswordResetEmail(email, otp, requestId) {
   const from = process.env.SMTP_FROM || process.env.SMTP_USER;
-  await emailTransporter.sendMail({
+  console.log('[OTP][SMTP_SEND_START]', {
+    requestId,
+    to: maskEmail(email),
+    from: maskEmail(from || ''),
+    transport: process.env.SMTP_SERVICE === 'gmail' || process.env.SMTP_HOST === 'smtp.gmail.com' ? 'gmail-465-tls' : 'custom',
+  });
+
+  const startedAt = Date.now();
+  const info = await emailTransporter.sendMail({
     from: from ? `Cargo Express 66 <${from}>` : undefined,
     to: email,
     subject: 'Cargo Express 66 password reset code',
     text: `Your Cargo Express 66 password reset code is ${otp}. It expires in ${PASSWORD_RESET_OTP_TTL_MINUTES} minutes. If you did not request this, you can ignore this email.`,
     html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#1f2937"><h2 style="color:#2563eb">Cargo Express 66</h2><p>Use this one-time code to reset your password:</p><p style="font-size:32px;font-weight:700;letter-spacing:8px;color:#111827">${otp}</p><p>This code expires in ${PASSWORD_RESET_OTP_TTL_MINUTES} minutes and can be used only once.</p><p style="color:#6b7280;font-size:13px">If you did not request a password reset, you can ignore this email.</p></div>`,
   });
+
+  console.log('[OTP][SMTP_SEND_SUCCESS]', {
+    requestId,
+    to: maskEmail(email),
+    messageId: info.messageId,
+    response: info.response,
+    accepted: info.accepted,
+    rejected: info.rejected,
+    durationMs: Date.now() - startedAt,
+  });
+  return info;
 }
 
 /**
@@ -421,14 +446,19 @@ const changePassword = async (req, res, next) => {
  */
 const forgotPassword = async (req, res, next) => {
   try {
+    const requestId = req.requestId || 'no-request-id';
+    const startedAt = Date.now();
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.warn('[OTP][VALIDATION_FAILED]', { requestId, details: errors.array() });
       return res.status(422).json({ error: 'Validation failed', details: errors.array() });
     }
 
     const normalizedEmail = req.body.email.toLowerCase();
+    console.log('[OTP][START]', { requestId, email: maskEmail(normalizedEmail) });
     const genericResponse = {
       message: 'If an account exists for this email, a verification code has been sent.',
+      request_id: requestId,
     };
 
     const { data: customer, error: customerError } = await supabaseAdmin
@@ -438,7 +468,11 @@ const forgotPassword = async (req, res, next) => {
       .maybeSingle();
 
     if (customerError) throw customerError;
-    if (!customer || !customer.is_active) return res.json(genericResponse);
+    if (!customer || !customer.is_active) {
+      console.log('[OTP][NO_ACTIVE_ACCOUNT]', { requestId, email: maskEmail(normalizedEmail) });
+      return res.json(genericResponse);
+    }
+    console.log('[OTP][ACCOUNT_FOUND]', { requestId, userId: customer.user_id });
 
     const resendCutoff = new Date(Date.now() - PASSWORD_RESET_RESEND_SECONDS * 1000).toISOString();
     const { data: recentRequest, error: recentRequestError } = await supabaseAdmin
@@ -452,6 +486,7 @@ const forgotPassword = async (req, res, next) => {
 
     if (recentRequestError) throw recentRequestError;
     if (recentRequest) {
+      console.log('[OTP][THROTTLED]', { requestId, email: maskEmail(normalizedEmail) });
       return res.json(genericResponse);
     }
 
@@ -467,15 +502,37 @@ const forgotPassword = async (req, res, next) => {
     });
 
     if (insertError) throw insertError;
+    console.log('[OTP][DB_INSERT_SUCCESS]', {
+      requestId,
+      expiresAt,
+      durationMs: Date.now() - startedAt,
+    });
     try {
-      await sendPasswordResetEmail(normalizedEmail, otp);
+      await sendPasswordResetEmail(normalizedEmail, otp, requestId);
     } catch (emailError) {
       await supabaseAdmin.from('password_reset_otps').delete().eq('email', normalizedEmail).eq('otp_hash', otpHash);
-      throw emailError;
+      console.error('[OTP][SMTP_SEND_FAILED]', {
+        requestId,
+        code: emailError.code,
+        command: emailError.command,
+        responseCode: emailError.responseCode,
+        message: emailError.message,
+        durationMs: Date.now() - startedAt,
+      });
+      return res.status(503).json({
+        error: 'Email service is temporarily unavailable. Please try again later.',
+        request_id: requestId,
+      });
     }
+    console.log('[OTP][COMPLETE]', { requestId, status: 200, durationMs: Date.now() - startedAt });
     return res.json(genericResponse);
   } catch (err) {
-    console.error('[FORGOT_PASSWORD] Unexpected error:', err.message || err);
+    console.error('[OTP][UNEXPECTED_ERROR]', {
+      requestId: req.requestId || 'no-request-id',
+      code: err.code,
+      message: err.message || err,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+    });
     next(err);
   }
 };

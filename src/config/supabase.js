@@ -5,11 +5,19 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
-if (!supabaseUrl) {
-  throw new Error('SUPABASE_URL is required');
+const missingSupabaseSettings = [];
+if (!supabaseUrl || /your-project\.supabase\.co|your-project/i.test(supabaseUrl)) {
+  missingSupabaseSettings.push('SUPABASE_URL');
 }
-if (!supabaseServiceKey) {
-  console.warn('SUPABASE_SERVICE_KEY not set — using anon key (limited privileges)');
+if (!supabaseAnonKey || /your-anon-key/i.test(supabaseAnonKey)) {
+  missingSupabaseSettings.push('SUPABASE_ANON_KEY');
+}
+if (!supabaseServiceKey || /your-service-role-key/i.test(supabaseServiceKey)) {
+  missingSupabaseSettings.push('SUPABASE_SERVICE_KEY');
+}
+
+if (missingSupabaseSettings.length > 0) {
+  throw new Error(`Supabase environment is not configured. Set: ${missingSupabaseSettings.join(', ')}`);
 }
 
 // Admin client with service role — bypasses RLS

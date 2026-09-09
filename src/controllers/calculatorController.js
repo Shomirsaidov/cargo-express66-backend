@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/supabase');
+const { getActiveTariffByCountry } = require('../services/parcelService');
 
 /**
  * POST /api/calculator/calculate
@@ -15,29 +16,10 @@ const calculate = async (req, res, next) => {
     const { country, weight, service_ids = [], item_type = 'regular' } = req.body;
     const weightKg = parseFloat(weight || 0);
 
-    // Fetch tariff for the country for display info (fallback is USA if not found)
-    let tariff = null;
-    const { data: tariffData } = await supabaseAdmin
-      .from('tariffs')
-      .select('*')
-      .eq('is_active', true)
-      .ilike('country', country)
-      .single();
-    if (tariffData) {
-      tariff = tariffData;
-    } else {
-      // Fallback tariff
-      tariff = { 
-        id: 'd6f43e01-6b24-4893-bc24-be2ef2f94567', 
-        price_per_kg: 16.00, 
-        minimum_charge: 10.00, 
-        delivery_time: '7-10 days',
-        tech_rates: {}
-      };
-    }
+    const tariff = await getActiveTariffByCountry(country);
 
-    const baseRate = parseFloat(tariff.price_per_kg || 16.00);
-    const minimumCharge = parseFloat(tariff.minimum_charge || 0.00);
+    const baseRate = Number(tariff.price_per_kg);
+    const minimumCharge = Number(tariff.minimum_charge || 0);
 
     // Merge default tech rates with database-configured tech rates
     let techRates = {

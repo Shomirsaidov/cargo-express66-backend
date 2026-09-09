@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 
 const routes = require('./routes/index');
 const { errorHandler } = require('./middleware/errorHandler');
@@ -10,6 +11,28 @@ const { errorHandler } = require('./middleware/errorHandler');
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (Render reverse proxy)
 const PORT = process.env.PORT || 3001;
+
+// Correlate browser requests with every server-side log line.
+app.use((req, res, next) => {
+  req.requestId = req.headers['x-request-id'] || crypto.randomUUID();
+  res.setHeader('X-Request-Id', req.requestId);
+  const startedAt = Date.now();
+  console.log('[REQUEST]', {
+    requestId: req.requestId,
+    method: req.method,
+    path: req.path,
+  });
+  res.on('finish', () => {
+    console.log('[RESPONSE]', {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    });
+  });
+  next();
+});
 
 // ─── Security middleware ────────────────────────────────────────────────────
 app.use(helmet({
