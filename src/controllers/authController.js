@@ -70,12 +70,19 @@ const register = async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(422).json({ error: 'Validation failed', details: errors.array() });
+      const errorDetails = errors.array().map(e => `${e.param}: ${e.msg}`).join('; ');
+      console.error('[REGISTER] Validation failed:', errorDetails);
+      return res.status(422).json({
+        error: 'Validation failed',
+        details: errors.array(),
+        message: errorDetails
+      });
     }
 
     const { first_name, last_name, middle_name, phone, email, password, delivery_address } = req.body;
-
     const normalizedEmail = email.toLowerCase();
+
+    console.log('[REGISTER] Attempting registration for email:', normalizedEmail);
 
     // Check if email already exists in customers
     const { data: existingCustomer, error: existingCustomerError } = await supabaseAdmin
@@ -85,10 +92,12 @@ const register = async (req, res, next) => {
       .maybeSingle();
 
     if (existingCustomerError) {
+      console.error('[REGISTER] Error checking existing customer:', existingCustomerError);
       throw existingCustomerError;
     }
 
     if (existingCustomer) {
+      console.warn('[REGISTER] Email already registered:', normalizedEmail);
       return res.status(409).json({ error: 'Email already registered' });
     }
 
@@ -101,6 +110,7 @@ const register = async (req, res, next) => {
 
     if (authError) {
       const message = authError.message || '';
+      console.error('[REGISTER] Supabase auth creation failed:', message);
       if (/(already|exists|duplicate)/i.test(message)) {
         return res.status(409).json({ error: 'Email already registered' });
       }
@@ -108,6 +118,7 @@ const register = async (req, res, next) => {
     }
 
     const userId = authData.user.id;
+    console.log('[REGISTER] Auth user created with ID:', userId);
 
     let customer;
     let customerError;
@@ -133,9 +144,13 @@ const register = async (req, res, next) => {
       customer = result.data;
       customerError = result.error;
 
-      if (!customerError) break;
+      if (!customerError) {
+        console.log('[REGISTER] Customer record created:', customerCode);
+        break;
+      }
 
       if (customerError.code === '23505' && /customer_code|email|user_id/i.test(customerError.message || '')) {
+        console.warn(`[REGISTER] Duplicate key attempt ${attempt + 1}, retrying...`);
         continue;
       }
 
@@ -143,12 +158,14 @@ const register = async (req, res, next) => {
     }
 
     if (customerError) {
+      console.error('[REGISTER] Customer creation failed:', customerError.message);
       await supabaseAdmin.auth.admin.deleteUser(userId).catch(() => {});
       throw customerError;
     }
 
     const { accessToken, refreshToken } = issueTokens(userId, customer.role);
 
+    console.log('[REGISTER] Registration successful for email:', normalizedEmail);
     res.status(201).json({
       message: 'Registration successful',
       data: {
@@ -158,6 +175,7 @@ const register = async (req, res, next) => {
       },
     });
   } catch (err) {
+    console.error('[REGISTER] Unexpected error:', err.message || err);
     next(err);
   }
 };
@@ -169,38 +187,50 @@ const login = async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(422).json({ error: 'Validation failed', details: errors.array() });
+      const errorDetails = errors.array().map(e => `${e.param}: ${e.msg}`).join('; ');
+      console.error('[LOGIN] Validation failed:', errorDetails);
+      return res.status(422).json({
+        error: 'Validation failed',
+        details: errors.array(),
+        message: errorDetails
+      });
     }
 
     const { email, password } = req.body;
+    const normalizedEmail = email.toLowerCase();
+    console.log('[LOGIN] Attempting login for email:', normalizedEmail);
 
     // Fetch customer by email
     const { data: customer, error } = await supabaseAdmin
       .from('customers')
       .select('*')
-      .eq('email', email.toLowerCase())
+      .eq('email', normalizedEmail)
       .single();
 
     if (error || !customer) {
+      console.warn('[LOGIN] Customer not found:', normalizedEmail);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     if (!customer.is_active) {
+      console.warn('[LOGIN] Account deactivated:', normalizedEmail);
       return res.status(403).json({ error: 'Account is deactivated' });
     }
 
     // Verify password via Supabase Auth
     const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       password: password
     });
 
     if (signInError) {
+      console.warn('[LOGIN] Invalid password for email:', normalizedEmail);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const { accessToken, refreshToken } = issueTokens(customer.user_id, customer.role);
 
+    console.log('[LOGIN] Login successful for email:', normalizedEmail, 'role:', customer.role);
     res.json({
       message: 'Login successful',
       data: {
@@ -210,6 +240,7 @@ const login = async (req, res, next) => {
       },
     });
   } catch (err) {
+    console.error('[LOGIN] Unexpected error:', err.message || err);
     next(err);
   }
 };
