@@ -17,25 +17,9 @@ app.use(helmet({
 }));
 
 // ─── CORS ───────────────────────────────────────────────────────────────────
-const allowedOrigins = [
-  'https://cargo-express66.vercel.app',
-  'https://cargo-express-66.vercel.app',
-  'https://www.cargo-express66.com',
-  'https://cargo-express66.com',
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://127.0.0.1:5173'
-];
-
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS not allowed'));
-    }
-  },
-  credentials: true,
+  origin: '*',
+  credentials: false,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   exposedHeaders: ['Content-Length', 'X-JSON-Response-Body'],
