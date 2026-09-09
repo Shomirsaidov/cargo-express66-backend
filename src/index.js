@@ -17,14 +17,15 @@ app.use(helmet({
 }));
 
 // ─── CORS ───────────────────────────────────────────────────────────────────
-app.use(cors({
-  origin: '*',
-  credentials: false,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  exposedHeaders: ['Content-Length', 'X-JSON-Response-Body'],
-  maxAge: 86400,
-}));
+app.use(cors());
+app.options('*', cors());
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'false');
+  next();
+});
 
 // ─── Rate limiting ───────────────────────────────────────────────────────────
 const isDev = process.env.NODE_ENV === 'development';
