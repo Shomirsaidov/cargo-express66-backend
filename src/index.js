@@ -17,11 +17,29 @@ app.use(helmet({
 }));
 
 // ─── CORS ───────────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  'https://cargo-express66.vercel.app',
+  'https://cargo-express-66.vercel.app',
+  'https://www.cargo-express66.com',
+  'https://cargo-express66.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173'
+];
+
 app.use(cors({
-  origin: (origin, callback) => callback(null, true),
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS not allowed'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Length', 'X-JSON-Response-Body'],
+  maxAge: 86400,
 }));
 
 // ─── Rate limiting ───────────────────────────────────────────────────────────
@@ -47,6 +65,17 @@ app.use('/api/auth', authLimiter);
 // ─── Body parsing ────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ─── Cache Control headers for API responses ────────────────────────────────
+app.use((req, res, next) => {
+  // No caching for API endpoints
+  if (req.path.startsWith('/api/')) {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
+  next();
+});
 
 // ─── Request logging (development) ──────────────────────────────────────────
 if (process.env.NODE_ENV === 'development') {
