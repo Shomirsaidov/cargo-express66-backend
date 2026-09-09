@@ -1,5 +1,20 @@
 -- Run this SQL in your Supabase SQL Editor to migrate the database:
 
+-- One-time password reset codes. OTPs are stored as bcrypt hashes and expire quickly.
+CREATE TABLE IF NOT EXISTS public.password_reset_otps (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email text NOT NULL,
+  user_id uuid NOT NULL,
+  otp_hash text NOT NULL,
+  attempts integer NOT NULL DEFAULT 0,
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  used_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS password_reset_otps_email_requested_idx
+  ON public.password_reset_otps (email, requested_at DESC);
+
 -- Convert all customer_code values from numeric format like CX66-000057 to alphabetical format like CX-AAAAAA
 CREATE OR REPLACE FUNCTION public.number_to_letters(num integer, length integer DEFAULT 6)
 RETURNS text

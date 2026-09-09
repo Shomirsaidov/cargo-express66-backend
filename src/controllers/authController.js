@@ -1,9 +1,30 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const { validationResult } = require('express-validator');
 const { supabaseAdmin, supabase } = require('../config/supabase');
+const emailTransporter = require('../config/email');
 require('dotenv').config();
+
+const PASSWORD_RESET_OTP_TTL_MINUTES = 10;
+const PASSWORD_RESET_MAX_ATTEMPTS = 5;
+const PASSWORD_RESET_RESEND_SECONDS = 60;
+
+function createPasswordResetOtp() {
+  return crypto.randomInt(100000, 1000000).toString();
+}
+
+async function sendPasswordResetEmail(email, otp) {
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  await emailTransporter.sendMail({
+    from: from ? `Cargo Express 66 <${from}>` : undefined,
+    to: email,
+    subject: 'Cargo Express 66 password reset code',
+    text: `Your Cargo Express 66 password reset code is ${otp}. It expires in ${PASSWORD_RESET_OTP_TTL_MINUTES} minutes. If you did not request this, you can ignore this email.`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#1f2937"><h2 style="color:#2563eb">Cargo Express 66</h2><p>Use this one-time code to reset your password:</p><p style="font-size:32px;font-weight:700;letter-spacing:8px;color:#111827">${otp}</p><p>This code expires in ${PASSWORD_RESET_OTP_TTL_MINUTES} minutes and can be used only once.</p><p style="color:#6b7280;font-size:13px">If you did not request a password reset, you can ignore this email.</p></div>`,
+  });
+}
 
 /**
  * Generate a unique customer code in the required format: CX-AAAAAA
@@ -396,6 +417,127 @@ const changePassword = async (req, res, next) => {
 };
 
 /**
+ * POST /api/auth/forgot-password
+ */
+const forgotPassword = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(422).json({ error: 'Validation failed', details: errors.array() });
+    }
+
+    const normalizedEmail = req.body.email.toLowerCase();
+    const genericResponse = {
+      message: 'If an account exists for this email, a verification code has been sent.',
+    };
+
+    const { data: customer, error: customerError } = await supabaseAdmin
+      .from('customers')
+      .select('user_id, email, is_active')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (customerError) throw customerError;
+    if (!customer || !customer.is_active) return res.json(genericResponse);
+
+    const resendCutoff = new Date(Date.now() - PASSWORD_RESET_RESEND_SECONDS * 1000).toISOString();
+    const { data: recentRequest, error: recentRequestError } = await supabaseAdmin
+      .from('password_reset_otps')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .gte('requested_at', resendCutoff)
+      .order('requested_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (recentRequestError) throw recentRequestError;
+    if (recentRequest) {
+      return res.json(genericResponse);
+    }
+
+    const otp = createPasswordResetOtp();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_OTP_TTL_MINUTES * 60 * 1000).toISOString();
+
+    const { error: insertError } = await supabaseAdmin.from('password_reset_otps').insert({
+      email: normalizedEmail,
+      user_id: customer.user_id,
+      otp_hash: otpHash,
+      expires_at: expiresAt,
+    });
+
+    if (insertError) throw insertError;
+    try {
+      await sendPasswordResetEmail(normalizedEmail, otp);
+    } catch (emailError) {
+      await supabaseAdmin.from('password_reset_otps').delete().eq('email', normalizedEmail).eq('otp_hash', otpHash);
+      throw emailError;
+    }
+    return res.json(genericResponse);
+  } catch (err) {
+    console.error('[FORGOT_PASSWORD] Unexpected error:', err.message || err);
+    next(err);
+  }
+};
+
+/**
+ * POST /api/auth/reset-password
+ */
+const resetPassword = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(422).json({ error: 'Validation failed', details: errors.array() });
+    }
+
+    const { email, otp, new_password } = req.body;
+    const normalizedEmail = email.toLowerCase();
+    const { data: resetRequest, error: requestError } = await supabaseAdmin
+      .from('password_reset_otps')
+      .select('*')
+      .eq('email', normalizedEmail)
+      .is('used_at', null)
+      .order('requested_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (requestError) throw requestError;
+    if (!resetRequest || new Date(resetRequest.expires_at) <= new Date()) {
+      return res.status(400).json({ error: 'The code is invalid or expired.' });
+    }
+    if (resetRequest.attempts >= PASSWORD_RESET_MAX_ATTEMPTS) {
+      return res.status(400).json({ error: 'Too many incorrect attempts. Request a new code.' });
+    }
+
+    const isValidOtp = await bcrypt.compare(otp, resetRequest.otp_hash);
+    if (!isValidOtp) {
+      await supabaseAdmin
+        .from('password_reset_otps')
+        .update({ attempts: resetRequest.attempts + 1 })
+        .eq('id', resetRequest.id);
+      return res.status(400).json({ error: 'The code is invalid or expired.' });
+    }
+
+    const { error: updateAuthError } = await supabaseAdmin.auth.admin.updateUserById(
+      resetRequest.user_id,
+      { password: new_password }
+    );
+    if (updateAuthError) throw updateAuthError;
+
+    const { error: consumeError } = await supabaseAdmin
+      .from('password_reset_otps')
+      .update({ used_at: new Date().toISOString() })
+      .eq('id', resetRequest.id);
+    if (consumeError) throw consumeError;
+
+    return res.json({ message: 'Password reset successfully. You can now sign in.' });
+  } catch (err) {
+    console.error('[RESET_PASSWORD] Unexpected error:', err.message || err);
+    next(err);
+  }
+};
+
+/**
  * Remove sensitive fields from customer object
  */
 function sanitizeCustomer(customer) {
@@ -403,4 +545,14 @@ function sanitizeCustomer(customer) {
   return safe;
 }
 
-module.exports = { register, login, logout, refresh, me, updateProfile, changePassword };
+module.exports = {
+  register,
+  login,
+  logout,
+  refresh,
+  me,
+  updateProfile,
+  changePassword,
+  forgotPassword,
+  resetPassword,
+};

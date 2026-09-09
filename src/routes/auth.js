@@ -30,6 +30,24 @@ router.post(
   authController.login
 );
 
+// POST /api/auth/forgot-password
+router.post(
+  '/forgot-password',
+  [body('email').isEmail().withMessage('Valid email is required')],
+  authController.forgotPassword
+);
+
+// POST /api/auth/reset-password
+router.post(
+  '/reset-password',
+  [
+    body('email').isEmail().withMessage('Valid email is required'),
+    body('otp').isLength({ min: 6, max: 6 }).isNumeric().withMessage('A 6-digit code is required'),
+    body('new_password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+  ],
+  authController.resetPassword
+);
+
 // POST /api/auth/logout
 router.post('/logout', authenticate, authController.logout);
 
