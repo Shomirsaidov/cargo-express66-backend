@@ -104,6 +104,48 @@ router.get('/dashboard', authenticate, requireRole('admin'), async (req, res, ne
       }
     });
 
+    // 9. Weekly shipments (last 7 days, by day)
+    const weeklyShipments = Array(7).fill(0);
+    for (let i = 0; i < 7; i++) {
+      const day = new Date();
+      day.setDate(day.getDate() - (6 - i));
+      day.setHours(0, 0, 0, 0);
+      const nextDay = new Date(day);
+      nextDay.setDate(nextDay.getDate() + 1);
+
+      const { count: dayCount, error: dayErr } = await supabaseAdmin
+        .from('parcels')
+        .select('id', { count: 'exact', head: true })
+        .gte('created_at', day.toISOString())
+        .lt('created_at', nextDay.toISOString());
+
+      if (!dayErr) weeklyShipments[i] = dayCount || 0;
+    }
+
+    // 10. Monthly revenue (last 6 months)
+    const monthlyRevenue = [];
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date();
+      date.setMonth(date.getMonth() - i);
+      date.setDate(1);
+      date.setHours(0, 0, 0, 0);
+      const nextMonth = new Date(date);
+      nextMonth.setMonth(nextMonth.getMonth() + 1);
+
+      const { data: monthData, error: monthErr } = await supabaseAdmin
+        .from('parcels')
+        .select('total_cost')
+        .gte('created_at', date.toISOString())
+        .lt('created_at', nextMonth.toISOString());
+
+      if (!monthErr) {
+        const monthRevenue = (monthData || []).reduce((sum, p) => sum + (parseFloat(p.total_cost) || 0), 0);
+        monthlyRevenue.push(Math.round(monthRevenue * 100) / 100);
+      } else {
+        monthlyRevenue.push(0);
+      }
+    }
+
     res.json({
       data: {
         total_customers: totalCustomers || 0,
@@ -113,9 +155,8 @@ router.get('/dashboard', authenticate, requireRole('admin'), async (req, res, ne
         revenue: parseFloat(revenue.toFixed(2)),
         weekly_volume: weeklyVolume || 0,
         recent_activity: recentActivity,
-        // Mock weekly/monthly chart series if no historical database aggregator
-        weekly_shipments: [10, 15, 8, 12, 20, 4, 2],
-        monthly_revenue: [1000, 1500, 1200, 2000, 1800, 2400],
+        weekly_shipments: weeklyShipments,
+        monthly_revenue: monthlyRevenue,
         status_breakdown: breakdown
       }
     });
