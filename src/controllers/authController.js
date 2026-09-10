@@ -51,43 +51,10 @@ async function sendPasswordResetEmail(email, otp, requestId) {
   return info;
 }
 
-/**
- * Generate a unique customer code in the required format: CX-AAAAAA
- */
-function numberToLetters(num, length = 6) {
-  let result = '';
-  let temp = num;
-
-  for (let i = 0; i < length; i += 1) {
-    const code = temp % 26;
-    result = String.fromCharCode(65 + code) + result;
-    temp = Math.floor(temp / 26);
-  }
-
-  return result;
-}
-
 async function generateCustomerCode() {
-  const { data, error } = await supabaseAdmin
-    .from('customers')
-    .select('customer_code');
-
+  const { data, error } = await supabaseAdmin.rpc('next_customer_code');
   if (error) throw error;
-
-  const existingCodes = Array.isArray(data) ? data.map((row) => row.customer_code).filter(Boolean) : [];
-  const maxIndex = existingCodes.reduce((max, code) => {
-    const match = /^CX-([A-Z]{6})$/.exec(code);
-    if (!match) return max;
-
-    const letters = match[1];
-    let value = 0;
-    for (let i = 0; i < letters.length; i += 1) {
-      value = value * 26 + (letters.charCodeAt(i) - 65);
-    }
-    return Math.max(max, value + 1);
-  }, 0);
-
-  return `CX-${numberToLetters(maxIndex, 6)}`;
+  return data;
 }
 
 /**

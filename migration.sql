@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS public.password_reset_otps (
 CREATE INDEX IF NOT EXISTS password_reset_otps_email_requested_idx
   ON public.password_reset_otps (email, requested_at DESC);
 
--- Convert all customer_code values from numeric format like CX66-000057 to alphabetical format like CX-AAAAAA
+-- Convert legacy numeric codes once. This filter is intentional: rerunning this
+-- migration must never renumber existing alphabetical customer codes.
 CREATE OR REPLACE FUNCTION public.number_to_letters(num integer, length integer DEFAULT 6)
 RETURNS text
 LANGUAGE plpgsql
@@ -40,16 +41,58 @@ BEGIN
 END;
 $$;
 
-WITH ordered_customers AS (
-  SELECT
-    id,
-    ROW_NUMBER() OVER (ORDER BY created_at, id) - 1 AS row_index
-  FROM public.customers
-)
 UPDATE public.customers c
-SET customer_code = 'CX-' || public.number_to_letters(oc.row_index, 6)
-FROM ordered_customers oc
-WHERE c.id = oc.id;
+SET customer_code = 'CX-' || public.number_to_letters(
+  (substring(c.customer_code FROM '^CX66-([0-9]{6})$')::integer) - 1,
+  6
+)
+WHERE c.customer_code ~ '^CX66-[0-9]{6}$';
+
+-- Allocate new codes atomically. Unlike MAX(customer_code), a sequence cannot
+-- return the same code to two concurrent registrations.
+CREATE SEQUENCE IF NOT EXISTS public.customer_code_sequence
+  AS bigint
+  MINVALUE 0
+  START WITH 0;
+
+DO $$
+DECLARE
+  next_index bigint;
+BEGIN
+  SELECT COALESCE(MAX(value), -1) + 1
+  INTO next_index
+  FROM (
+    SELECT
+      SUM((ascii(substr(customer_code, position, 1)) - 65) * power(26, 6 - position))::bigint AS value
+    FROM public.customers,
+      generate_series(1, 6) AS position
+    WHERE customer_code ~ '^CX-[A-Z]{6}$'
+    GROUP BY customer_code
+  ) codes;
+
+  PERFORM setval('public.customer_code_sequence', next_index, false);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.next_customer_code()
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+AS $$
+DECLARE
+  value bigint := nextval('public.customer_code_sequence');
+  result text := '';
+  remainder bigint;
+BEGIN
+  FOR position IN 1..6 LOOP
+    remainder := value % 26;
+    result := chr(65 + remainder) || result;
+    value := value / 26;
+  END LOOP;
+
+  RETURN 'CX-' || result;
+END;
+$$;
 
 -- Add columns to tracking_numbers table
 ALTER TABLE public.tracking_numbers ADD COLUMN IF NOT EXISTS additional_services UUID[] DEFAULT '{}';
