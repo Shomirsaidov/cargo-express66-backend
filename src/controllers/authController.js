@@ -133,60 +133,68 @@ const register = async (req, res, next) => {
     const userId = authData.user.id;
     console.log('[REGISTER] Auth user created with ID:', userId);
 
-    let customer;
-    let customerError;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const customerCode = await generateCustomerCode();
-      const result = await supabaseAdmin
-        .from('customers')
-        .insert({
-          user_id: userId,
-          customer_code: customerCode,
-          first_name,
-          last_name,
-          middle_name: middle_name || null,
-          phone,
-          email: normalizedEmail,
-          delivery_address,
-          role: 'customer',
-          is_active: true,
-        })
-        .select()
-        .single();
+    // The Supabase Auth user now exists. Everything below must roll it back on
+    // failure — otherwise the email is permanently stuck: login fails because
+    // there is no `customers` row, and re-registering fails with 409 because
+    // createUser() reports the address as already taken.
+    try {
+      let customer;
+      let customerError;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const customerCode = await generateCustomerCode();
+        const result = await supabaseAdmin
+          .from('customers')
+          .insert({
+            user_id: userId,
+            customer_code: customerCode,
+            first_name,
+            last_name,
+            middle_name: middle_name || null,
+            phone,
+            email: normalizedEmail,
+            delivery_address,
+            role: 'customer',
+            is_active: true,
+          })
+          .select()
+          .single();
 
-      customer = result.data;
-      customerError = result.error;
+        customer = result.data;
+        customerError = result.error;
 
-      if (!customerError) {
-        console.log('[REGISTER] Customer record created:', customerCode);
+        if (!customerError) {
+          console.log('[REGISTER] Customer record created:', customerCode);
+          break;
+        }
+
+        if (customerError.code === '23505' && /customer_code|email|user_id/i.test(customerError.message || '')) {
+          console.warn(`[REGISTER] Duplicate key attempt ${attempt + 1}, retrying...`);
+          continue;
+        }
+
         break;
       }
 
-      if (customerError.code === '23505' && /customer_code|email|user_id/i.test(customerError.message || '')) {
-        console.warn(`[REGISTER] Duplicate key attempt ${attempt + 1}, retrying...`);
-        continue;
-      }
+      if (customerError) throw customerError;
 
-      break;
+      const { accessToken, refreshToken } = issueTokens(userId, customer.role);
+
+      console.log('[REGISTER] Registration successful for email:', normalizedEmail);
+      return res.status(201).json({
+        message: 'Registration successful',
+        data: {
+          customer: sanitizeCustomer(customer),
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        },
+      });
+    } catch (profileError) {
+      console.error('[REGISTER] Profile creation failed, rolling back auth user:', profileError.message || profileError);
+      await supabaseAdmin.auth.admin.deleteUser(userId).catch((cleanupError) => {
+        console.error('[REGISTER] Auth user rollback failed:', cleanupError.message || cleanupError);
+      });
+      throw profileError;
     }
-
-    if (customerError) {
-      console.error('[REGISTER] Customer creation failed:', customerError.message);
-      await supabaseAdmin.auth.admin.deleteUser(userId).catch(() => {});
-      throw customerError;
-    }
-
-    const { accessToken, refreshToken } = issueTokens(userId, customer.role);
-
-    console.log('[REGISTER] Registration successful for email:', normalizedEmail);
-    res.status(201).json({
-      message: 'Registration successful',
-      data: {
-        customer: sanitizeCustomer(customer),
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      },
-    });
   } catch (err) {
     console.error('[REGISTER] Unexpected error:', err.message || err);
     next(err);

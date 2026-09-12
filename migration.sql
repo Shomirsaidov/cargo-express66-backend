@@ -74,6 +74,9 @@ BEGIN
 END;
 $$;
 
+-- NOTE: `remainder` must be integer, not bigint. PostgreSQL only defines
+-- chr(integer); chr(bigint) does not exist, so `chr(65 + remainder)` fails with
+-- "function chr(bigint) does not exist" and every registration breaks.
 CREATE OR REPLACE FUNCTION public.next_customer_code()
 RETURNS text
 LANGUAGE plpgsql
@@ -82,10 +85,10 @@ AS $$
 DECLARE
   value bigint := nextval('public.customer_code_sequence');
   result text := '';
-  remainder bigint;
+  remainder integer;
 BEGIN
   FOR position IN 1..6 LOOP
-    remainder := value % 26;
+    remainder := (value % 26)::integer;
     result := chr(65 + remainder) || result;
     value := value / 26;
   END LOOP;
