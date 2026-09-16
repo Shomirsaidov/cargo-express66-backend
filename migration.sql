@@ -63,7 +63,11 @@ BEGIN
   INTO next_index
   FROM (
     SELECT
-      SUM((ascii(substr(customer_code, position, 1)) - 65) * power(26, 6 - position))::bigint AS value
+      -- position + 3 skips the "CX-" prefix. Without the offset this reads
+      -- "CX-AAA" instead of the 6-letter suffix, so every code in the
+      -- CX-AAAAxx range collapses to the same bogus value (~33.9M) and the
+      -- sequence is seeded far past the real high-water mark.
+      SUM((ascii(substr(customer_code, position + 3, 1)) - 65) * power(26, 6 - position))::bigint AS value
     FROM public.customers,
       generate_series(1, 6) AS position
     WHERE customer_code ~ '^CX-[A-Z]{6}$'

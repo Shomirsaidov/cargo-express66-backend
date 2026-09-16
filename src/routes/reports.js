@@ -12,4 +12,12 @@ router.get(
   reportController.generateWeeklyReport
 );
 
+// GET /api/reports/awb/:id?format=excel|csv|pdf
+router.get(
+  '/awb/:id',
+  authenticate,
+  requireRole('admin', 'warehouse_employee'),
+  reportController.generateAwbReport
+);
+
 module.exports = router;

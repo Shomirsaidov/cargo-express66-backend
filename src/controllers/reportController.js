@@ -58,4 +58,45 @@ const generateWeeklyReport = async (req, res, next) => {
   }
 };
 
-module.exports = { generateWeeklyReport };
+/**
+ * GET /api/reports/awb/:id?format=excel|csv|pdf
+ */
+const generateAwbReport = async (req, res, next) => {
+  try {
+    const format = (req.query.format || 'excel').toLowerCase();
+    const validFormats = ['excel', 'csv', 'pdf'];
+
+    if (!validFormats.includes(format)) {
+      return res.status(422).json({ error: `Invalid format. Use: ${validFormats.join(', ')}` });
+    }
+
+    const reportData = await reportService.buildAwbReportData(req.params.id);
+
+    const filename = `awb-report-${reportData.awb.awb_number}`;
+
+    if (format === 'excel') {
+      const buffer = await reportService.generateExcel(reportData);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
+      return res.send(buffer);
+    }
+
+    if (format === 'csv') {
+      const csvString = await reportService.generateCSV(reportData);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}.csv"`);
+      return res.send(csvString);
+    }
+
+    if (format === 'pdf') {
+      const buffer = await reportService.generatePDF(reportData, reportData.startDate, reportData.endDate);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}.pdf"`);
+      return res.send(buffer);
+    }
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { generateWeeklyReport, generateAwbReport };

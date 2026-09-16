@@ -43,6 +43,46 @@ const buildWeeklyReportData = async (startDate, endDate) => {
 };
 
 /**
+ * Fetch parcel data for a specific Air Waybill
+ */
+const buildAwbReportData = async (awbId) => {
+  const { data: awb, error: awbError } = await supabaseAdmin
+    .from('airway_bills')
+    .select('*')
+    .eq('id', awbId)
+    .single();
+
+  if (awbError || !awb) throw new Error('Air waybill not found');
+
+  const allowedCols = await getParcelsColumns();
+  const selectString = `${allowedCols.join(', ')},
+     customers(id, customer_code, first_name, last_name, email, delivery_address),
+     warehouses(id, name, country)`;
+
+  const { data, error } = await supabaseAdmin
+    .from('parcels')
+    .select(selectString)
+    .eq('airway_bill_id', awbId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw error;
+
+  const parcels = data || [];
+
+  return {
+    awb,
+    title: `Cargo Express 66 — AWB Report: ${awb.awb_number} (${awb.departure_country})`,
+    subtitle: `AWB Report: ${awb.awb_number} | ${awb.departure_country} | Departure: ${awb.departure_date ? awb.departure_date.split('T')[0] : '-'}`,
+    startDate: awb.departure_date ? awb.departure_date.split('T')[0] : '-',
+    endDate: '',
+    parcels,
+    totalParcels: parcels.length,
+    totalWeight: parcels.reduce((sum, p) => sum + (parseFloat(p.weight) || 0), 0),
+    totalRevenue: parcels.reduce((sum, p) => sum + (parseFloat(p.total_cost) || 0), 0),
+  };
+};
+
+/**
  * Generate Excel report using ExcelJS
  */
 const generateExcel = async (reportData) => {
@@ -55,7 +95,7 @@ const generateExcel = async (reportData) => {
   // Title row - extended to P1 (16 columns)
   sheet.mergeCells('A1:P1');
   const titleCell = sheet.getCell('A1');
-  titleCell.value = `Cargo Express 66 — Weekly Report (${reportData.startDate} to ${reportData.endDate})`;
+  titleCell.value = reportData.title || `Cargo Express 66 — Weekly Report (${reportData.startDate} to ${reportData.endDate})`;
   titleCell.font = { bold: true, size: 14, color: { argb: 'FF6997CF' } };
   titleCell.alignment = { horizontal: 'center' };
   sheet.getRow(1).height = 30;
@@ -196,7 +236,7 @@ const generateCSV = async (reportData) => {
   });
 
   const csvLines = [
-    `# Cargo Express 66 - Weekly Report (${reportData.startDate} to ${reportData.endDate})`,
+    `# ${reportData.title || `Cargo Express 66 - Weekly Report (${reportData.startDate} to ${reportData.endDate})`}`,
     `# Total Parcels: ${reportData.totalParcels} | Total Weight: ${reportData.totalWeight.toFixed(2)} kg | Total Revenue: $${reportData.totalRevenue.toFixed(2)}`,
     headers.join(','),
     ...rows,
@@ -228,7 +268,7 @@ const generatePDF = async (reportData, startDate, endDate) => {
     doc.fillColor('#FFFFFF').fontSize(22).font('Helvetica-Bold')
       .text('Cargo Express 66', 40, 20);
     doc.fontSize(12).font('Helvetica')
-      .text(`Weekly Report: ${startDate} — ${endDate}`, 40, 48);
+      .text(reportData.subtitle || `Weekly Report: ${startDate} — ${endDate}`, 40, 48);
 
     // Summary box
     doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Report Summary', 40, 100);
@@ -333,4 +373,4 @@ const generatePDF = async (reportData, startDate, endDate) => {
   });
 };
 
-module.exports = { buildWeeklyReportData, generateExcel, generateCSV, generatePDF };
+module.exports = { buildWeeklyReportData, buildAwbReportData, generateExcel, generateCSV, generatePDF };
