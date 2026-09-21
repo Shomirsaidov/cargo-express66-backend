@@ -14,15 +14,17 @@ router.get('/', authenticate, requireRole('admin', 'warehouse_employee'), custom
 // GET /api/customers/:id — admin only
 router.get('/:id', authenticate, requireRole('admin'), customerController.getById);
 
-// PUT /api/customers/:id — admin or the customer themselves
 router.put(
   '/:id',
   authenticate,
   [
-    body('first_name').optional().trim().notEmpty(),
-    body('last_name').optional().trim().notEmpty(),
-    body('phone').optional().trim().notEmpty(),
-    body('delivery_address').optional().trim().notEmpty(),
+    body('first_name').optional().trim().notEmpty().withMessage('Имя не может быть пустым'),
+    body('last_name').optional().trim().notEmpty().withMessage('Фамилия не может быть пустой'),
+    body('middle_name').optional().trim(),
+    body('phone').optional().trim(),
+    body('delivery_address').optional().trim(),
+    body('role').optional().isIn(['customer', 'warehouse_employee', 'admin']),
+    body('is_active').optional().isBoolean(),
   ],
   customerController.update
 );
