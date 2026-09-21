@@ -210,14 +210,17 @@ const update = async (req, res, next) => {
     if (dimensions !== undefined) updates.dimensions = dimensions;
     if (declared_value !== undefined) updates.declared_value = parseFloat(declared_value);
     if (notes !== undefined) updates.notes = notes;
-    if (arrival_date !== undefined) updates.arrival_date = arrival_date;
-    if (shipment_date !== undefined) updates.shipment_date = shipment_date;
-    if (delivery_date !== undefined) updates.delivery_date = delivery_date;
+    if (arrival_date !== undefined && arrival_date !== null && arrival_date !== '') updates.arrival_date = arrival_date;
+    if (shipment_date !== undefined && shipment_date !== null && shipment_date !== '') updates.shipment_date = shipment_date;
+    if (delivery_date !== undefined && delivery_date !== null && delivery_date !== '') updates.delivery_date = delivery_date;
     if (recipient_name !== undefined) updates.recipient_name = recipient_name;
     if (product_description !== undefined) updates.product_description = product_description;
     if (product_link !== undefined) updates.product_link = product_link;
     if (destination_country !== undefined) updates.destination_country = destination_country;
     if (recipient_is_customer !== undefined) updates.recipient_is_customer = (recipient_is_customer === 'true' || recipient_is_customer === true);
+
+    // Safeguard: created_at must NEVER be modified on update
+    delete updates.created_at;
 
     // Handle new photos
     let existingPhotos = existing.photos || [];
@@ -381,14 +384,30 @@ const updateStatus = async (req, res, next) => {
       targetStatus = 'received_at_warehouse';
     }
 
+    // If status is identical, do NOT alter dates or create duplicate history
+    if (existing.status === targetStatus) {
+      const { data: currentParcel } = await supabaseAdmin
+        .from('parcels')
+        .select('*, customers(id, customer_code, first_name, last_name, email)')
+        .eq('id', req.params.id)
+        .single();
+      return res.json({ data: currentParcel || existing });
+    }
+
     // If previous status was unknown_recipient and new status is different, clean up history
     const isTransitioningFromUnknown = existing.status === 'unknown_recipient' && targetStatus !== 'unknown_recipient';
 
-    // Update parcel status
+    // Update parcel status — PRESERVE existing dates, only set if previously null
     const statusUpdates = { status: targetStatus };
-    if (targetStatus === 'delivered') statusUpdates.delivery_date = new Date().toISOString();
-    if (targetStatus === 'received_at_warehouse') statusUpdates.arrival_date = new Date().toISOString();
-    if (targetStatus === 'dispatched') statusUpdates.shipment_date = new Date().toISOString();
+    if (targetStatus === 'delivered' && !existing.delivery_date) {
+      statusUpdates.delivery_date = new Date().toISOString();
+    }
+    if (targetStatus === 'received_at_warehouse' && !existing.arrival_date) {
+      statusUpdates.arrival_date = new Date().toISOString();
+    }
+    if (targetStatus === 'dispatched' && !existing.shipment_date) {
+      statusUpdates.shipment_date = new Date().toISOString();
+    }
 
     const { data: updatedParcel, error: updateError } = await supabaseAdmin
       .from('parcels')

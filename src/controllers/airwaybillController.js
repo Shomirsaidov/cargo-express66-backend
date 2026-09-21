@@ -171,7 +171,7 @@ const assignParcel = async (req, res, next) => {
     // Verify parcel exists
     const { data: parcel, error: parcelError } = await supabaseAdmin
       .from('parcels')
-      .select('id')
+      .select('id, shipment_date, arrival_date')
       .eq('id', parcel_id)
       .single();
 
@@ -213,14 +213,21 @@ const assignParcel = async (req, res, next) => {
       notes = `Parcel assigned to cancelled flight ${awb.awb_number}`;
     }
 
-    // Update parcel airway_bill_id and status
+    // Update parcel airway_bill_id and status — preserve existing dates
+    const parcelDateUpdates = {};
+    if (parcelStatus === 'in_transit' && !parcel.shipment_date) {
+      parcelDateUpdates.shipment_date = new Date().toISOString();
+    }
+    if (parcelStatus === 'arrived_in_dushanbe' && !parcel.arrival_date) {
+      parcelDateUpdates.arrival_date = new Date().toISOString();
+    }
+
     const { data: updatedParcel, error: updateParcelErr } = await supabaseAdmin
       .from('parcels')
       .update({ 
         airway_bill_id: req.params.id, 
         status: parcelStatus,
-        ...(parcelStatus === 'in_transit' ? { shipment_date: new Date().toISOString() } : {}),
-        ...(parcelStatus === 'arrived_in_dushanbe' ? { arrival_date: new Date().toISOString() } : {})
+        ...parcelDateUpdates
       })
       .eq('id', parcel_id)
       .select('*, customers(id, first_name, last_name, email)')
@@ -352,20 +359,28 @@ const syncParcelsStatus = async (awbId, awbStatus, awbNumber, changedByUserId) =
 
     if (!parcelStatus) return;
 
-    const statusUpdates = { status: parcelStatus };
-    if (parcelStatus === 'in_transit') {
-      statusUpdates.shipment_date = new Date().toISOString();
-    } else if (parcelStatus === 'arrived_in_dushanbe') {
-      statusUpdates.arrival_date = new Date().toISOString();
-    }
-
-    // Update all parcels
-    const { error: updateError } = await supabaseAdmin
+    // Fetch existing parcel dates to preserve them
+    const { data: existingParcels } = await supabaseAdmin
       .from('parcels')
-      .update(statusUpdates)
+      .select('id, shipment_date, arrival_date')
       .in('id', parcelIds);
 
-    if (updateError) throw updateError;
+    const nowIso = new Date().toISOString();
+
+    for (const p of existingParcels || []) {
+      const pUpdates = { status: parcelStatus };
+      if (parcelStatus === 'in_transit' && !p.shipment_date) {
+        pUpdates.shipment_date = nowIso;
+      }
+      if (parcelStatus === 'arrived_in_dushanbe' && !p.arrival_date) {
+        pUpdates.arrival_date = nowIso;
+      }
+
+      await supabaseAdmin
+        .from('parcels')
+        .update(pUpdates)
+        .eq('id', p.id);
+    }
 
     // Log history for all parcels
     const historyRecords = parcelIds.map((id) => ({

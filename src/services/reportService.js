@@ -14,6 +14,11 @@ const getRecipientDisplayName = (parcel) => {
   return parcel.recipient_name || '-';
 };
 
+const getParcelReportDate = (parcel) => {
+  const d = parcel.arrival_date || parcel.shipment_date || parcel.created_at;
+  return d ? d.split('T')[0] : '-';
+};
+
 /**
  * Fetch parcel data for the given date range
  */
@@ -158,7 +163,7 @@ const generateExcel = async (reportData) => {
       destination_country: parcel.destination_country || 'Таджикистан',
       warehouse: parcel.warehouses ? `${parcel.warehouses.name} (${parcel.warehouses.country})` : '-',
       status: (parcel.status || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-      arrival_date: parcel.arrival_date ? parcel.arrival_date.split('T')[0] : '-',
+      arrival_date: getParcelReportDate(parcel),
       declared_value: parcel.declared_value ? parseFloat(parcel.declared_value).toFixed(2) : '0.00',
       total_cost: parcel.total_cost ? parseFloat(parcel.total_cost).toFixed(2) : '0.00',
       product_description: parcel.product_description || '',
@@ -226,7 +231,7 @@ const generateCSV = async (reportData) => {
       `"${(parcel.destination_country || 'Таджикистан').replace(/"/g, '""')}"`,
       parcel.warehouses ? `${parcel.warehouses.name} (${parcel.warehouses.country})` : '-',
       (parcel.status || '').replace(/_/g, ' '),
-      parcel.arrival_date ? parcel.arrival_date.split('T')[0] : '-',
+      getParcelReportDate(parcel),
       parcel.declared_value ? parseFloat(parcel.declared_value).toFixed(2) : '0.00',
       parcel.total_cost ? parseFloat(parcel.total_cost).toFixed(2) : '0.00',
       `"${(parcel.product_description || '').replace(/"/g, '""')}"`,
@@ -338,7 +343,7 @@ const generatePDF = async (reportData, startDate, endDate) => {
         parcel.destination_country || 'Таджикистан',
         parcel.warehouses ? parcel.warehouses.name : '-',
         (parcel.status || '').replace(/_/g, ' '),
-        parcel.arrival_date ? parcel.arrival_date.split('T')[0] : '-',
+        getParcelReportDate(parcel),
         parcel.declared_value ? `$${parseFloat(parcel.declared_value).toFixed(2)}` : '$0.00',
         parcel.total_cost ? `$${parseFloat(parcel.total_cost).toFixed(2)}` : '$0.00',
         parcel.product_description || '-',
