@@ -28,7 +28,17 @@ const VALID_STATUSES = [
 const list = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page || '1', 10);
-    const limit = parseInt(req.query.limit || '20', 10);
+    const rawLimit = req.query.limit || req.query.per_page;
+    let limit;
+    if (rawLimit === 'all' || rawLimit === '0' || rawLimit === '-1') {
+      limit = 10000;
+    } else if (rawLimit) {
+      limit = parseInt(rawLimit, 10);
+    } else if (req.user.role === 'customer') {
+      limit = 1000;
+    } else {
+      limit = 20;
+    }
     const offset = (page - 1) * limit;
 
     let query = supabaseAdmin
@@ -41,8 +51,7 @@ const list = async (req, res, next) => {
         parcel_services(id, cost, additional_services(id, name, description))`,
         { count: 'exact' }
       )
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order('created_at', { ascending: false });
 
     // Non-admin: only own parcels
     if (req.user.role === 'customer') {
@@ -58,6 +67,8 @@ const list = async (req, res, next) => {
     if (req.query.search) {
       query = query.ilike('tracking_number', `%${req.query.search}%`);
     }
+
+    query = query.range(offset, offset + limit - 1);
 
     const { data, error, count } = await query;
     if (error) throw error;

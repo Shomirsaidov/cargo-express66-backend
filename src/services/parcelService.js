@@ -5,6 +5,8 @@ const { filterPayload } = require('../utils/schema');
 
 const normalizeCountry = (country) => String(country || '').trim().toLowerCase();
 
+const EUROPE_COUNTRIES = ['spain', 'испания', 'italy', 'италия', 'france', 'франция', 'germany', 'германия'];
+
 const getActiveTariffByCountry = async (country) => {
   const { data: tariffs, error } = await supabaseAdmin
     .from('tariffs')
@@ -13,9 +15,20 @@ const getActiveTariffByCountry = async (country) => {
 
   if (error) throw error;
 
-  const tariff = (tariffs || []).find(
-    (item) => normalizeCountry(item.country) === normalizeCountry(country)
+  const target = normalizeCountry(country);
+  let tariff = (tariffs || []).find(
+    (item) => normalizeCountry(item.country) === target
   );
+
+  // Fallback: if European country, match Germany (Europe transit hub)
+  if (!tariff && EUROPE_COUNTRIES.includes(target)) {
+    tariff = (tariffs || []).find((item) => normalizeCountry(item.country).includes('german') || normalizeCountry(item.country).includes('герман'));
+  }
+
+  // General fallback: first active tariff
+  if (!tariff && tariffs && tariffs.length > 0) {
+    tariff = tariffs[0];
+  }
 
   if (!tariff) {
     const errorWithStatus = new Error(`No active tariff configured for warehouse country: ${country}`);
@@ -75,21 +88,17 @@ const computeCosts = async ({ warehouse_id, weight, declared_value, service_ids 
 
   const tariff = await getActiveTariffByCountry(warehouse.country);
   const baseRate = Number(tariff.price_per_kg);
-  const minimumCharge = Number(tariff.minimum_charge || 0);
 
   if (weight) {
     const weightKg = parseFloat(weight);
-    const calculatedWeight = weightKg < 1.0 ? 1.0 : weightKg;
     let rate = baseRate;
-    if (calculatedWeight >= 1000) {
+    if (weightKg >= 1000) {
       rate = Math.max(1, baseRate - 5); // Example: $16 -> $11 ($5 discount)
-    } else if (calculatedWeight >= 100) {
+    } else if (weightKg >= 100) {
       rate = Math.max(1, baseRate - 1); // Example: $16 -> $15 ($1 discount)
     }
-    deliveryCost = calculatedWeight * rate;
-    if (deliveryCost < minimumCharge) {
-      deliveryCost = minimumCharge;
-    }
+    // Calculate strictly by gram without artificial 1kg floor or minimum charge
+    deliveryCost = weightKg * rate;
   }
 
   // Calculate services

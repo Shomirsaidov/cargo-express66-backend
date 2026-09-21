@@ -9,7 +9,10 @@ const { filterPayload } = require('../utils/schema');
 const list = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page || '1', 10);
-    const limit = parseInt(req.query.limit || '50', 10);
+    const rawLimit = req.query.limit || req.query.per_page;
+    const limit = (rawLimit === 'all' || rawLimit === '0' || rawLimit === '-1')
+      ? 10000
+      : parseInt(rawLimit || '1000', 10);
     const offset = (page - 1) * limit;
 
     const { data, error, count } = await supabaseAdmin

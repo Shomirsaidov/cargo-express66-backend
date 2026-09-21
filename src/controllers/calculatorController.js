@@ -43,17 +43,13 @@ const calculate = async (req, res, next) => {
     if (item_type && techRates[item_type]) {
       baseCost = techRates[item_type];
     } else {
-      const calculatedWeight = weightKg < 1.0 ? 1.0 : weightKg;
       let rate = baseRate;
-      if (calculatedWeight >= 1000) {
+      if (weightKg >= 1000) {
         rate = Math.max(1, baseRate - 5); // Example: $16 -> $11 ($5 discount)
-      } else if (calculatedWeight >= 100) {
+      } else if (weightKg >= 100) {
         rate = Math.max(1, baseRate - 1); // Example: $16 -> $15 ($1 discount)
       }
-      baseCost = calculatedWeight * rate;
-      if (baseCost < minimumCharge) {
-        baseCost = minimumCharge;
-      }
+      baseCost = weightKg * rate;
     }
 
     // Calculate additional services cost
