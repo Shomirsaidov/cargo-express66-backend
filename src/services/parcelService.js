@@ -2,7 +2,7 @@ const { supabaseAdmin } = require('../config/supabase');
 const { uploadToCloudinary } = require('../utils/cloudinaryUtils');
 const notificationService = require('./notificationService');
 const { filterPayload } = require('../utils/schema');
-const { buildTrackingCandidates, buildTrackingContains } = require('../utils/tracking');
+const { buildTrackingCandidates, buildTrackingContains, buildTrackingSuffixes, trackingTail } = require('../utils/tracking');
 
 const DEFAULT_PARCEL_TRACKING_SELECT = `*,
   customers(id, customer_code, first_name, last_name, email, phone),
@@ -10,24 +10,37 @@ const DEFAULT_PARCEL_TRACKING_SELECT = `*,
 
 const TRACKING_RECORD_SELECT = '*, customers(*)';
 
-// `tracking_number_norm` only exists after migration_tracking_fix.sql. We probe
-// it once and remember the answer so we don't repeat failing queries.
+// `tracking_number_norm` / `tracking_number_tail` only exist after
+// migration_tracking_fix.sql. We probe each once and remember the answer so we
+// don't repeat failing queries.
 let trackingNormColumnSupported = null;
+let trackingTailColumnSupported = null;
 
 /**
  * Fetch the first row matching a tracking number.
  *
- * Matching works in BOTH directions, because either side may hold the longer
- * value (client typed the 12-digit FedEx number, scanner stored 16–17 digits —
- * or the reverse):
+ * Matching runs in three widening passes, because the client's record and the
+ * warehouse scan almost never look identical:
  *
- *   1. exact match on any canonical candidate of the input (input >= stored)
- *   2. substring match (input < stored)
+ *   1. EXACT — the stored value equals a canonical spelling of the input.
+ *   2. SAME ENDING — the stored value ends with the input's tail. This is the
+ *      main rule: the scanner picks up extra LEADING characters (routing
+ *      prefix, zip, padding) that the client's record does not have, so the
+ *      beginnings differ while the endings are identical.
+ *   3. CONTAINS — the stored value merely contains the input (loosest).
  *
  * Prefers the normalized column and silently falls back to the raw column so the
  * app keeps working before the migration is applied.
  */
-const findFirstByTracking = async ({ table, select, candidates, contains = [], extra = [] }) => {
+const findFirstByTracking = async ({
+  table,
+  select,
+  candidates,
+  suffixes = [],
+  contains = [],
+  tail = '',
+  extra = [],
+}) => {
   if (!candidates.length) return null;
 
   const baseQuery = () => {
@@ -45,6 +58,9 @@ const findFirstByTracking = async ({ table, select, candidates, contains = [], e
   const noteColumnError = (error) => {
     if (error && error.code === '42703') trackingNormColumnSupported = false;
   };
+  const noteTailError = (error) => {
+    if (error && error.code === '42703') trackingTailColumnSupported = false;
+  };
 
   // 1) Exact match against any candidate spelling.
   for (const column of columns) {
@@ -53,7 +69,33 @@ const findFirstByTracking = async ({ table, select, candidates, contains = [], e
     if (!error && data && data.length > 0) return data[0];
   }
 
-  // 2) Substring match: the stored value is the longer scanned code.
+  // 2) SAME ENDING — the primary rule. The scanner picks up extra LEADING
+  //    characters, so the beginnings differ while the endings are identical.
+  //    Prefer the indexed tail column; otherwise scan with a `%tail` pattern.
+  if (tail && tail.length >= 8) {
+    if (trackingTailColumnSupported !== false) {
+      const { data, error } = await baseQuery().in('tracking_number_tail', [tail]).limit(1);
+      noteTailError(error);
+      if (!error && data && data.length > 0) return data[0];
+    }
+    for (const column of columns) {
+      const { data, error } = await baseQuery().ilike(column, `%${tail}`).limit(1);
+      noteColumnError(error);
+      if (!error && data && data.length > 0) return data[0];
+    }
+  }
+
+  // 2b) Longer endings (15/20/22 chars) for long-vs-long code pairs.
+  for (const suffix of suffixes) {
+    if (!suffix || suffix.length < 8 || suffix === tail) continue;
+    for (const column of columns) {
+      const { data, error } = await baseQuery().ilike(column, `%${suffix}`).limit(1);
+      noteColumnError(error);
+      if (!error && data && data.length > 0) return data[0];
+    }
+  }
+
+  // 3) Loose substring match: the stored value is the longer scanned code.
   for (const needle of contains) {
     if (!needle || needle.length < 8) continue;
     for (const column of columns) {
@@ -76,7 +118,9 @@ const findParcelByTracking = async (trackingNumber, select = DEFAULT_PARCEL_TRAC
     table: 'parcels',
     select,
     candidates,
+    suffixes: buildTrackingSuffixes(trackingNumber),
     contains: buildTrackingContains(trackingNumber),
+    tail: trackingTail(trackingNumber),
   });
 };
 
@@ -90,7 +134,9 @@ const findTrackingRecord = async (trackingNumber, { onlyUnlinked = false, select
     table: 'tracking_numbers',
     select,
     candidates: buildTrackingCandidates(trackingNumber),
+    suffixes: buildTrackingSuffixes(trackingNumber),
     contains: buildTrackingContains(trackingNumber),
+    tail: trackingTail(trackingNumber),
     extra: onlyUnlinked ? [['eq', 'is_linked', false]] : [],
   });
 

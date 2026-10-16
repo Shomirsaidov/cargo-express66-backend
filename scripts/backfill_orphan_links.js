@@ -18,8 +18,7 @@
  */
 require('dotenv').config();
 const https = require('https');
-const { buildTrackingCandidates, buildTrackingContains, normalizeTracking } =
-  require('../src/utils/tracking');
+const { normalizeTracking, trackingMatches } = require('../src/utils/tracking');
 
 const APPLY = process.argv.includes('--apply');
 const URL_BASE = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
@@ -46,16 +45,8 @@ const call = (method, p, body) =>
 
 const j = (s) => { try { return JSON.parse(s); } catch { return null; } };
 
-const predicate = (input, stored) => {
-  const raw = String(stored ?? '');
-  if (buildTrackingCandidates(input).includes(raw)) return true;
-  const storedNorm = normalizeTracking(raw);
-  for (const needle of buildTrackingContains(input)) {
-    if (needle.length < 8) continue;
-    if (storedNorm.includes(needle)) return true;
-  }
-  return false;
-};
+/** Shared rule — see trackingMatches in src/utils/tracking.js. */
+const predicate = trackingMatches;
 
 /** A stored value with a separator, or an absurdly long code, holds >1 number. */
 const isAmbiguous = (v) => /[,;/|]/.test(String(v ?? '')) || normalizeTracking(v).length > 34;

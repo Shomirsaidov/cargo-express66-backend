@@ -17,7 +17,7 @@ require('dotenv').config();
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { buildTrackingCandidates, buildTrackingContains, normalizeTracking, digitsOnly } =
+const { buildTrackingCandidates, buildTrackingContains, normalizeTracking, digitsOnly, trackingMatches } =
   require('../src/utils/tracking');
 
 const URL_BASE = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
@@ -39,17 +39,12 @@ const get = (p) =>
 
 const j = (s) => { try { return JSON.parse(s); } catch { return null; } };
 
-/** Exact mirror of parcelService.findFirstByTracking (input = scan, stored = registered). */
-const predicate = (input, stored) => {
-  const raw = String(stored ?? '');
-  if (buildTrackingCandidates(input).includes(raw)) return true;
-  const storedNorm = normalizeTracking(raw);
-  for (const needle of buildTrackingContains(input)) {
-    if (needle.length < 8) continue;
-    if (storedNorm.includes(needle)) return true;
-  }
-  return false;
-};
+/**
+ * The matching rule now lives in ONE place — `trackingMatches` in
+ * src/utils/tracking.js — and mirrors parcelService.findFirstByTracking exactly:
+ *   1. exact, 2. SAME ENDING (the main rule), 3. contains.
+ */
+const predicate = trackingMatches;
 
 (async () => {
   const parcels = j((await get('/rest/v1/parcels?select=id,tracking_number,customer_id,status,created_at&limit=10000')).body) || [];
