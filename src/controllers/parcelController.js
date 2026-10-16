@@ -323,10 +323,18 @@ const update = async (req, res, next) => {
       if (Object.keys(trackingUpdates).length > 0) {
         const filteredTrackingUpdates = await filterPayload('tracking_numbers', trackingUpdates);
         if (Object.keys(filteredTrackingUpdates).length > 0) {
-          await supabaseAdmin
-            .from('tracking_numbers')
-            .update(filteredTrackingUpdates)
-            .eq('tracking_number', data.tracking_number);
+          // Tolerant matching: the tracking_numbers row may hold the customer's
+          // shorter number while the parcel holds the longer scanned code.
+          const trackingRow = await parcelService.findTrackingRecord(
+            data.tracking_number,
+            { select: 'id' }
+          );
+          if (trackingRow) {
+            await supabaseAdmin
+              .from('tracking_numbers')
+              .update(filteredTrackingUpdates)
+              .eq('id', trackingRow.id);
+          }
         }
       }
     }
@@ -465,18 +473,16 @@ const scan = async (req, res, next) => {
 const getByTrackingNumber = async (req, res, next) => {
   try {
     const { tracking_number } = req.params;
-    const { data: parcel, error } = await supabaseAdmin
-      .from('parcels')
-      .select(`
+    // Tolerant matching: the public 12-digit FedEx number must resolve even when
+    // the warehouse scanner stored a longer code (or vice versa).
+    const parcel = await parcelService.findParcelByTracking(tracking_number, `
         *,
         customers(id, customer_code, first_name, last_name),
         warehouses(name),
         parcel_status_history(status, notes, created_at)
-      `)
-      .eq('tracking_number', tracking_number.trim())
-      .single();
+      `);
 
-    if (error || !parcel) {
+    if (!parcel) {
       return res.status(404).json({ error: 'Parcel not found' });
     }
 

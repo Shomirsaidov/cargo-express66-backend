@@ -2,6 +2,101 @@ const { supabaseAdmin } = require('../config/supabase');
 const { uploadToCloudinary } = require('../utils/cloudinaryUtils');
 const notificationService = require('./notificationService');
 const { filterPayload } = require('../utils/schema');
+const { buildTrackingCandidates, buildTrackingContains } = require('../utils/tracking');
+
+const DEFAULT_PARCEL_TRACKING_SELECT = `*,
+  customers(id, customer_code, first_name, last_name, email, phone),
+  warehouses(id, name, country)`;
+
+const TRACKING_RECORD_SELECT = '*, customers(*)';
+
+// `tracking_number_norm` only exists after migration_tracking_fix.sql. We probe
+// it once and remember the answer so we don't repeat failing queries.
+let trackingNormColumnSupported = null;
+
+/**
+ * Fetch the first row matching a tracking number.
+ *
+ * Matching works in BOTH directions, because either side may hold the longer
+ * value (client typed the 12-digit FedEx number, scanner stored 16–17 digits —
+ * or the reverse):
+ *
+ *   1. exact match on any canonical candidate of the input (input >= stored)
+ *   2. substring match (input < stored)
+ *
+ * Prefers the normalized column and silently falls back to the raw column so the
+ * app keeps working before the migration is applied.
+ */
+const findFirstByTracking = async ({ table, select, candidates, contains = [], extra = [] }) => {
+  if (!candidates.length) return null;
+
+  const baseQuery = () => {
+    let query = supabaseAdmin.from(table).select(select);
+    for (const [op, col, val] of extra) {
+      query = query[op](col, val);
+    }
+    return query;
+  };
+
+  const columns = trackingNormColumnSupported === false
+    ? ['tracking_number']
+    : ['tracking_number_norm', 'tracking_number'];
+
+  const noteColumnError = (error) => {
+    if (error && error.code === '42703') trackingNormColumnSupported = false;
+  };
+
+  // 1) Exact match against any candidate spelling.
+  for (const column of columns) {
+    const { data, error } = await baseQuery().in(column, candidates).limit(1);
+    noteColumnError(error);
+    if (!error && data && data.length > 0) return data[0];
+  }
+
+  // 2) Substring match: the stored value is the longer scanned code.
+  for (const needle of contains) {
+    if (!needle || needle.length < 8) continue;
+    for (const column of columns) {
+      const { data, error } = await baseQuery().ilike(column, `%${needle}%`).limit(1);
+      noteColumnError(error);
+      if (!error && data && data.length > 0) return data[0];
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Find a parcel by tracking number using tolerant matching.
+ * Accepts an optional custom select for lighter/joined responses.
+ */
+const findParcelByTracking = async (trackingNumber, select = DEFAULT_PARCEL_TRACKING_SELECT) => {
+  const candidates = buildTrackingCandidates(trackingNumber);
+  return findFirstByTracking({
+    table: 'parcels',
+    select,
+    candidates,
+    contains: buildTrackingContains(trackingNumber),
+  });
+};
+
+/**
+ * Find a tracking_numbers row with tolerant matching.
+ * `onlyUnlinked` restricts the search to numbers the customer registered that the
+ * warehouse has not received yet.
+ */
+const findTrackingRecord = async (trackingNumber, { onlyUnlinked = false, select = TRACKING_RECORD_SELECT } = {}) =>
+  findFirstByTracking({
+    table: 'tracking_numbers',
+    select,
+    candidates: buildTrackingCandidates(trackingNumber),
+    contains: buildTrackingContains(trackingNumber),
+    extra: onlyUnlinked ? [['eq', 'is_linked', false]] : [],
+  });
+
+/** Find a pre-registered (not yet linked) tracking record with its customer. */
+const findPreRegisteredTracking = (trackingNumber) =>
+  findTrackingRecord(trackingNumber, { onlyUnlinked: true });
 
 const normalizeCountry = (country) => String(country || '').trim().toLowerCase();
 
@@ -47,17 +142,12 @@ const getActiveTariffByCountry = async (country) => {
 };
 
 /**
- * Find a customer by tracking number (from tracking_numbers table)
+ * Find a customer by tracking number (from tracking_numbers table).
+ * Uses tolerant matching so a 12-digit FedEx number matches a longer scan.
  */
 const linkTrackingNumber = async (trackingNumber) => {
-  const { data: trackingRecord, error } = await supabaseAdmin
-    .from('tracking_numbers')
-    .select('*, customers(*)')
-    .eq('tracking_number', trackingNumber)
-    .eq('is_linked', false)
-    .single();
-
-  if (error || !trackingRecord) return null;
+  const trackingRecord = await findPreRegisteredTracking(trackingNumber);
+  if (!trackingRecord) return null;
 
   return {
     customer: trackingRecord.customers,
@@ -166,12 +256,8 @@ const createParcel = async ({
   recipient_is_customer,
 }) => {
   // Try to find pre-registered tracking number in all cases
-  const { data: trackingRecord } = await supabaseAdmin
-    .from('tracking_numbers')
-    .select('*')
-    .eq('tracking_number', tracking_number.trim())
-    .eq('is_linked', false)
-    .single();
+  // (tolerant matching: client's 12-digit number vs. longer warehouse scan)
+  const trackingRecord = await findPreRegisteredTracking(tracking_number);
 
   let linkedCustomerId = customer_id;
   let finalDescription = product_description;
@@ -291,16 +377,8 @@ const createParcel = async ({
  * Returns: existing parcel OR creates new one, with customer info
  */
 const handleScan = async (tracking_number, scanningUser) => {
-  // Check if parcel already exists
-  const { data: existingParcel } = await supabaseAdmin
-    .from('parcels')
-    .select(
-      `*,
-      customers(id, customer_code, first_name, last_name, email, phone),
-      warehouses(id, name, country)`
-    )
-    .eq('tracking_number', tracking_number)
-    .single();
+  // Check if parcel already exists (tolerant matching against the scan)
+  const existingParcel = await findParcelByTracking(tracking_number);
 
   if (existingParcel) {
     return {
@@ -407,6 +485,10 @@ const updateParcelServicesAndCosts = async (parcelId, serviceIds, declaredValue,
 
 module.exports = {
   linkTrackingNumber,
+  findParcelByTracking,
+  findPreRegisteredTracking,
+  findTrackingRecord,
+  DEFAULT_PARCEL_TRACKING_SELECT,
   computeCosts,
   createParcel,
   handleScan,

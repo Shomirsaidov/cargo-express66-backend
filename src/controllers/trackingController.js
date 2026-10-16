@@ -1,6 +1,7 @@
 const { validationResult } = require('express-validator');
 const { supabaseAdmin } = require('../config/supabase');
 const notificationService = require('../services/notificationService');
+const parcelService = require('../services/parcelService');
 const { filterPayload } = require('../utils/schema');
 
 /**
@@ -53,12 +54,10 @@ const create = async (req, res, next) => {
       return res.status(409).json({ error: 'Tracking number already added' });
     }
 
-    // Check if a parcel with this tracking number already exists in the system without a customer
-    const { data: existingParcel } = await supabaseAdmin
-      .from('parcels')
-      .select('*')
-      .eq('tracking_number', tracking_number.trim())
-      .single();
+    // Check if a parcel with this tracking number already exists in the system
+    // (tolerant matching: the warehouse may have stored a longer scanned code,
+    // e.g. a FedEx label barcode with extra digits)
+    const existingParcel = await parcelService.findParcelByTracking(tracking_number, '*');
 
     let isLinked = false;
 
@@ -87,7 +86,6 @@ const create = async (req, res, next) => {
 
       if (!updateError && updatedParcel) {
         // Recalculate costs and attach services selected by the customer
-        const parcelService = require('../services/parcelService');
         try {
           await parcelService.updateParcelServicesAndCosts(
             updatedParcel.id,
@@ -196,14 +194,13 @@ const update = async (req, res, next) => {
 
      if (error) throw error;
 
-     // If already linked, sync services, costs, and recipient/details with the parcel
-     if (data.is_linked) {
-       const { data: parcel } = await supabaseAdmin
-         .from('parcels')
-         .select('id, weight, warehouse_id')
-         .eq('tracking_number', data.tracking_number)
-         .single();
-       if (parcel) {
+    // If already linked, sync services, costs, and recipient/details with the parcel
+    if (data.is_linked) {
+      const parcel = await parcelService.findParcelByTracking(
+        data.tracking_number,
+        'id, weight, warehouse_id'
+      );
+      if (parcel) {
          const parcelUpdates = {};
           if (recipient_name !== undefined) parcelUpdates.recipient_name = recipient_name;
           if (product_description !== undefined) parcelUpdates.product_description = product_description;
@@ -221,7 +218,6 @@ const update = async (req, res, next) => {
             }
           }
          if (additional_services !== undefined || declared_value !== undefined) {
-           const parcelService = require('../services/parcelService');
            try {
              await parcelService.updateParcelServicesAndCosts(
                parcel.id,
