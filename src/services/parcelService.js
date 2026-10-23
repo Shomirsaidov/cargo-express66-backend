@@ -2,7 +2,13 @@ const { supabaseAdmin } = require('../config/supabase');
 const { uploadToCloudinary } = require('../utils/cloudinaryUtils');
 const notificationService = require('./notificationService');
 const { filterPayload } = require('../utils/schema');
-const { buildTrackingCandidates, buildTrackingContains, buildTrackingSuffixes, trackingTail } = require('../utils/tracking');
+const {
+  significantCandidates,
+  buildTrackingContains,
+  buildTrackingSuffixes,
+  trackingTail,
+  MIN_OVERLAP,
+} = require('../utils/tracking');
 
 const DEFAULT_PARCEL_TRACKING_SELECT = `*,
   customers(id, customer_code, first_name, last_name, email, phone),
@@ -29,6 +35,9 @@ let trackingTailColumnSupported = null;
  *      beginnings differ while the endings are identical.
  *   3. CONTAINS — the stored value merely contains the input (loosest).
  *
+ * EVERY pass requires at least MIN_OVERLAP (7) characters to agree. Without that
+ * floor two unrelated numbers pair up on a one- or two-character coincidence.
+ *
  * Prefers the normalized column and silently falls back to the raw column so the
  * app keeps working before the migration is applied.
  */
@@ -41,6 +50,7 @@ const findFirstByTracking = async ({
   tail = '',
   extra = [],
 }) => {
+  // `candidates` are pre-filtered to MIN_OVERLAP by significantCandidates().
   if (!candidates.length) return null;
 
   const baseQuery = () => {
@@ -72,7 +82,7 @@ const findFirstByTracking = async ({
   // 2) SAME ENDING — the primary rule. The scanner picks up extra LEADING
   //    characters, so the beginnings differ while the endings are identical.
   //    Prefer the indexed tail column; otherwise scan with a `%tail` pattern.
-  if (tail && tail.length >= 8) {
+  if (tail && tail.length >= MIN_OVERLAP) {
     if (trackingTailColumnSupported !== false) {
       const { data, error } = await baseQuery().in('tracking_number_tail', [tail]).limit(1);
       noteTailError(error);
@@ -87,7 +97,7 @@ const findFirstByTracking = async ({
 
   // 2b) Longer endings (15/20/22 chars) for long-vs-long code pairs.
   for (const suffix of suffixes) {
-    if (!suffix || suffix.length < 8 || suffix === tail) continue;
+    if (!suffix || suffix.length < MIN_OVERLAP || suffix === tail) continue;
     for (const column of columns) {
       const { data, error } = await baseQuery().ilike(column, `%${suffix}`).limit(1);
       noteColumnError(error);
@@ -97,7 +107,7 @@ const findFirstByTracking = async ({
 
   // 3) Loose substring match: the stored value is the longer scanned code.
   for (const needle of contains) {
-    if (!needle || needle.length < 8) continue;
+    if (!needle || needle.length < MIN_OVERLAP) continue;
     for (const column of columns) {
       const { data, error } = await baseQuery().ilike(column, `%${needle}%`).limit(1);
       noteColumnError(error);
@@ -113,7 +123,7 @@ const findFirstByTracking = async ({
  * Accepts an optional custom select for lighter/joined responses.
  */
 const findParcelByTracking = async (trackingNumber, select = DEFAULT_PARCEL_TRACKING_SELECT) => {
-  const candidates = buildTrackingCandidates(trackingNumber);
+  const candidates = significantCandidates(trackingNumber);
   return findFirstByTracking({
     table: 'parcels',
     select,
@@ -133,7 +143,7 @@ const findTrackingRecord = async (trackingNumber, { onlyUnlinked = false, select
   findFirstByTracking({
     table: 'tracking_numbers',
     select,
-    candidates: buildTrackingCandidates(trackingNumber),
+    candidates: significantCandidates(trackingNumber),
     suffixes: buildTrackingSuffixes(trackingNumber),
     contains: buildTrackingContains(trackingNumber),
     tail: trackingTail(trackingNumber),

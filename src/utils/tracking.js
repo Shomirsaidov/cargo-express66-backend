@@ -62,6 +62,25 @@ const buildTrackingCandidates = (value) => {
 };
 
 /**
+ * Minimum number of characters that must agree before two tracking numbers are
+ * considered the same parcel.
+ *
+ * Without this floor short strings pair up by accident: "12" and "12" share two
+ * characters, and a 2-character coincidence is not evidence of anything. The
+ * business rule is that the last SEVEN characters must match.
+ *
+ * Applied to every partial path — exact, same-ending and contains — so a weak
+ * overlap can never sneak in through one of them.
+ *
+ * Raise this number to make pairing stricter.
+ */
+const MIN_OVERLAP = 7;
+
+/** Keep only candidates long enough to be a trustworthy identity match. */
+const significantCandidates = (value) =>
+  buildTrackingCandidates(value).filter((c) => normalizeTracking(c).length >= MIN_OVERLAP);
+
+/**
  * Canonical "needle" values for substring matching. Used when the STORED value
  * is longer than what the user typed — e.g. the customer enters the public
  * 12-digit FedEx number while the warehouse stored a 16–17 digit scan.
@@ -71,8 +90,8 @@ const buildTrackingContains = (value) => {
   const digits = digitsOnly(value);
 
   const out = new Set();
-  if (norm.length >= 8) out.add(norm);
-  if (digits.length >= 8 && digits !== norm) out.add(digits);
+  if (norm.length >= MIN_OVERLAP) out.add(norm);
+  if (digits.length >= MIN_OVERLAP && digits !== norm) out.add(digits);
   return Array.from(out);
 };
 
@@ -145,21 +164,23 @@ const trackingMatches = (input, stored) => {
   const raw = String(stored ?? '');
   if (!raw) return false;
 
-  // 1) exact
-  if (buildTrackingCandidates(input).includes(raw)) return true;
+  // 1) exact — but only on candidates long enough to mean something.
+  for (const c of significantCandidates(input)) {
+    if (c === raw) return true;
+  }
 
   const norm = normalizeTracking(raw);
 
-  // 2) same ending
+  // 2) same ending — the last MIN_OVERLAP characters must agree.
   const tail = trackingTail(input);
-  if (tail.length >= 8 && norm.endsWith(tail)) return true;
+  if (tail.length >= MIN_OVERLAP && norm.endsWith(tail)) return true;
   for (const suffix of buildTrackingSuffixes(input)) {
-    if (suffix.length >= 8 && norm.endsWith(suffix)) return true;
+    if (suffix.length >= MIN_OVERLAP && norm.endsWith(suffix)) return true;
   }
 
   // 3) contains
   for (const needle of buildTrackingContains(input)) {
-    if (needle.length >= 8 && norm.includes(needle)) return true;
+    if (needle.length >= MIN_OVERLAP && norm.includes(needle)) return true;
   }
 
   return false;
@@ -169,6 +190,7 @@ module.exports = {
   normalizeTracking,
   digitsOnly,
   buildTrackingCandidates,
+  significantCandidates,
   buildTrackingContains,
   buildTrackingSuffixes,
   trackingTail,
@@ -176,4 +198,5 @@ module.exports = {
   TRACKING_LENGTHS,
   SUFFIX_LENGTHS,
   TAIL_LENGTH,
+  MIN_OVERLAP,
 };

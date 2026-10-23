@@ -12,7 +12,7 @@
 require('dotenv').config();
 const https = require('https');
 const {
-  buildTrackingCandidates, buildTrackingContains, buildTrackingSuffixes, normalizeTracking,
+  buildTrackingCandidates, buildTrackingContains, normalizeTracking, trackingMatches, MIN_OVERLAP,
 } = require('../src/utils/tracking');
 
 const URL_BASE = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
@@ -35,18 +35,16 @@ const j = (s) => { try { return JSON.parse(s); } catch { return null; } };
 
 const oldRule = (input, stored) => String(input) === String(stored);
 
+/** Previous generation, kept for comparison (exact + contains, no ending rule). */
 const v1Rule = (input, stored) => {
   const raw = String(stored ?? '');
   if (buildTrackingCandidates(input).includes(raw)) return true;
   const sn = normalizeTracking(raw);
-  return buildTrackingContains(input).some((n) => n.length >= 8 && sn.includes(n));
+  return buildTrackingContains(input).some((n) => n.length >= MIN_OVERLAP && sn.includes(n));
 };
 
-const v2Rule = (input, stored) => {
-  if (v1Rule(input, stored)) return true;
-  const sn = normalizeTracking(stored);
-  return buildTrackingSuffixes(input).some((s) => s.length >= 8 && sn.endsWith(s));
-};
+/** Current generation — the single shared rule used by the service. */
+const v2Rule = trackingMatches;
 
 (async () => {
   const parcels = j((await get('/rest/v1/parcels?select=id,tracking_number,customer_id&limit=10000')).body) || [];
